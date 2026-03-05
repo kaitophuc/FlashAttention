@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include <cstring>
@@ -59,13 +60,35 @@ struct Tensor {
     }
 
     ~Tensor() {
-        if (data_ != nullptr) {
-            if (device_ == Device::CUDA) {
-                deallocate_device(data_);
-            } else {
-                deallocate_host(data_);
-            }
+        release();
+    }
+
+    Tensor(Tensor&& other) noexcept
+        : data_(std::exchange(other.data_, nullptr)),
+          shape_(std::move(other.shape_)),
+          strides_(std::move(other.strides_)),
+          dtype_(other.dtype_),
+          device_(other.device_),
+          numel_(other.numel_),
+          nbytes_(other.nbytes_) {
+        other.numel_ = 0;
+        other.nbytes_ = 0;
+    }
+
+    Tensor& operator=(Tensor&& other) noexcept {
+        if (this != &other) {
+            release();
+            data_ = std::exchange(other.data_, nullptr);
+            shape_ = std::move(other.shape_);
+            strides_ = std::move(other.strides_);
+            dtype_ = other.dtype_;
+            device_ = other.device_;
+            numel_ = other.numel_;
+            nbytes_ = other.nbytes_;
+            other.numel_ = 0;
+            other.nbytes_ = 0;
         }
+        return *this;
     }
 
     // Disable copying
@@ -154,6 +177,17 @@ struct Tensor {
     }
 
 private:
+    void release() noexcept {
+        if (data_ != nullptr) {
+            if (device_ == Device::CUDA) {
+                deallocate_device(data_);
+            } else {
+                deallocate_host(data_);
+            }
+        }
+        data_ = nullptr;
+    }
+
     template <typename T>
     bool check_dtype_match() const {
         if constexpr (std::is_same_v<T, float>) {
