@@ -299,7 +299,7 @@ Replace naive attention path with FlashAttention path.
 
 ---
 
-## Milestone 7 — Production features (optional, resume-strong)
+## Milestone 7 — Production features
 
 Pick 3–5 features.
 
@@ -322,7 +322,7 @@ Pick 3–5 features.
 
 ---
 
-## Testing strategy (non-negotiable)
+## Testing strategy
 
 ### Correctness
 
@@ -343,29 +343,6 @@ Pick 3–5 features.
   - achieved bandwidth,
   - achieved TFLOPs,
   - peak memory.
-
----
-
-## Suggested resume-grade final demo
-
-Include a report section in `README.md` with:
-
-- diagrams for tiling + streaming softmax,
-- latency vs `N` charts,
-- memory vs `N` charts,
-- Nsight Compute screenshots showing HBM transaction changes,
-- ablations: naive vs flash v1 vs flash v2.
-
-Code quality bar:
-
-- clean launch configurations,
-- reproducible benchmark commands,
-- CI-runnable correctness tests,
-- benchmark CLI like:
-
-```bash
-bench_attention --B 4 --H 16 --N 2048 --D 128
-```
 
 ---
 
