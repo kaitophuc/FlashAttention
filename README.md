@@ -81,7 +81,7 @@ If Google Benchmark is missing, CMake will try auto-fetch when `FA_AUTO_FETCH_BE
 
 ---
 
-## Milestone 0 — Environment + constraints (1–2 days) ✅
+## Milestone 0 — Environment + constraints ✅
 
 ### Deliverables
 
@@ -104,7 +104,7 @@ If Google Benchmark is missing, CMake will try auto-fetch when `FA_AUTO_FETCH_BE
 
 ---
 
-## Milestone 1 — Minimal tensor runtime (3–5 days) ✅
+## Milestone 1 — Minimal tensor runtime ✅
 
 ### Deliverables
 
@@ -132,7 +132,7 @@ If Google Benchmark is missing, CMake will try auto-fetch when `FA_AUTO_FETCH_BE
 
 ---
 
-## Milestone 2 — Core ops for Transformer (1–2 weeks)
+## Milestone 2 — Core ops for Transformer
 
 Implement forward + backward for each op (start naive, optimize later).
 
@@ -174,7 +174,7 @@ Optional early, required for training milestone.
 
 ---
 
-## Milestone 3 — Working Transformer (no FlashAttention yet) (1 week)
+## Milestone 3 — Working Transformer (no FlashAttention yet)
 
 ### Model
 
@@ -202,7 +202,7 @@ Optional early, required for training milestone.
 
 ---
 
-## Milestone 4 — FlashAttention forward (2–3 weeks)
+## Milestone 4 — FlashAttention forward
 
 Implement streaming attention forward without materializing `N x N`.
 
@@ -250,7 +250,7 @@ Tiling:
 
 ---
 
-## Milestone 5 — FlashAttention backward (3–5 weeks)
+## Milestone 5 — FlashAttention backward
 
 Backward is substantially harder than forward.
 
@@ -287,7 +287,7 @@ All tiled, no full `P`/`S` materialization.
 
 ---
 
-## Milestone 6 — Integrate into Transformer training (1–2 weeks)
+## Milestone 6 — Integrate into Transformer training
 
 Replace naive attention path with FlashAttention path.
 
@@ -299,7 +299,7 @@ Replace naive attention path with FlashAttention path.
 
 ---
 
-## Milestone 7 — Production features (optional, resume-strong) (2–4 weeks)
+## Milestone 7 — Production features (optional, resume-strong)
 
 Pick 3–5 features.
 
