@@ -20,6 +20,10 @@ struct Stream {
         }
     }
 
+    void synchronize() {
+        CUDA_CHECK(cudaStreamSynchronize(s));
+    }
+
     // Prevent copying
     Stream(const Stream&) = delete;
     Stream& operator=(const Stream&) = delete;
@@ -35,20 +39,24 @@ struct Event {
         cudaEventDestroy(e);
     }
 
+    void synchronize() {
+        CUDA_CHECK(cudaEventSynchronize(e));
+    }
+
     // Prevent copying
     Event(const Event&) = delete;
     Event& operator=(const Event&) = delete;
 };
 
-void record(Event& event, Stream& stream) {
+inline void record(Event& event, Stream& stream) {
     CUDA_CHECK(cudaEventRecord(event.e, stream.s));
 }
 
-void wait(Stream& stream, Event& event) {
+inline void wait(Stream& stream, Event& event) {
     CUDA_CHECK(cudaStreamWaitEvent(stream.s, event.e, 0));
 }
 
-float elapsed_time(Event& start, Event& end) {
+inline float elapsed_time(Event& start, Event& end) {
     float ms;
     CUDA_CHECK(cudaEventElapsedTime(&ms, start.e, end.e));
     return ms;

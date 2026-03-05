@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include <cuda_bf16.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -94,9 +96,35 @@ struct Tensor {
     // Disable copying
     Tensor(const Tensor&) = delete;
     Tensor& operator=(const Tensor&) = delete;
-    
+
     static Tensor empty(std::vector<int64_t> shape, DType dtype, Device device, Stream& stream) {
         return Tensor(std::move(shape), dtype, device, stream);
+    }
+
+    static Tensor empty(std::vector<int64_t> shape, DType dtype, Device device) {
+        if (device == Device::CUDA) {
+            Stream current(get_current_stream());
+            return Tensor(std::move(shape), dtype, device, current);
+        }
+        Stream current(cudaStream_t(0));
+        return Tensor(std::move(shape), dtype, device, current);
+    }
+
+    static Tensor zeros(std::vector<int64_t> shape, DType dtype, Device device, Stream& stream) {
+        Tensor out(std::move(shape), dtype, device, stream);
+        if (device == Device::CUDA) {
+            StreamGuard guard(stream);
+            out.zero_();
+        } else {
+            out.zero_();
+        }
+        return out;
+    }
+
+    static Tensor zeros(std::vector<int64_t> shape, DType dtype, Device device) {
+        Tensor out = empty(std::move(shape), dtype, device);
+        out.zero_();
+        return out;
     }
 
     size_t numel() const {
@@ -172,8 +200,37 @@ struct Tensor {
         return cloned;
     }
 
-    void copy_from(const Tensor& other, Stream& stream) {
-        // Implementation for copying data from another tensor.
+    void zero_() {
+        if (device_ == Device::CUDA) {
+            CUDA_CHECK(cudaMemsetAsync(data_, 0, nbytes_, get_current_stream()));
+        } else {
+            std::memset(data_, 0, nbytes_);
+        }
+    }
+
+    void copy_from(const Tensor& src, Stream& stream) {
+        if (shape_ != src.shape_) {
+            throw std::invalid_argument("Source and destination tensors must have the same shape.");
+        }
+        if (dtype_ != src.dtype_) {
+            throw std::invalid_argument("Source and destination tensors must have the same dtype.");
+        }
+        cudaMemcpyKind kind;
+        if (device_ == Device::CUDA && src.device_ == Device::CUDA) {
+            kind = cudaMemcpyDeviceToDevice;
+        } else if (device_ == Device::CUDA && src.device_ == Device::CPU) {
+            kind = cudaMemcpyHostToDevice;
+        } else if (device_ == Device::CPU && src.device_ == Device::CUDA) {
+            kind = cudaMemcpyDeviceToHost;
+        } else {
+            kind = cudaMemcpyHostToHost;
+        }
+
+        if (device_ == Device::CUDA || src.device_ == Device::CUDA) {
+            CUDA_CHECK(cudaMemcpyAsync(data_, src.data_, nbytes_, kind, stream.s));
+        } else {
+            std::memcpy(data_, src.data_, nbytes_);
+        }
     }
 
 private:
