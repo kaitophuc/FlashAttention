@@ -15,11 +15,12 @@ Target: CUDA + C++ (optionally a small Python wrapper only for data loading + pl
 ## Repo structure
 
 - `src/`
-  - `tensor/`: minimal tensor runtime + allocator (GPU + CPU)
+  - CUDA/C++ sources (`*.cu`, `*.cpp`)
   - `ops/`: matmul, layernorm, softmax, dropout, gelu, attention
   - `kernels/`: CUDA kernels (naive + flash)
   - `nn/`: modules: Linear, LayerNorm, MHA, MLP, TransformerBlock
   - `train/`: optimizer, dataloader, training loop
+- `include/`: shared headers (`*.h`, `*.hpp`)
 - `tests/`: unit tests + gradient checks
 - `bench/`: microbench + throughput benchmarks
 - `tools/`: reference implementation helpers (PyTorch validation, plotting)

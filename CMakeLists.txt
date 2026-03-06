@@ -82,24 +82,24 @@ endif()
 
 add_executable(tensor_tests
   tests/test_tensor.cu
-  src/tensor/src/cu_stream.cu
+  src/cu_stream.cu
 )
 target_include_directories(tensor_tests
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/tensor/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_link_libraries(tensor_tests PRIVATE CUDA::cudart GTest::gtest_main)
 
 if(benchmark_FOUND OR TARGET benchmark::benchmark OR TARGET benchmark)
   add_executable(tensor_bandwidth_bench
     bench/tensor_bandwidth_bench.cu
-    src/tensor/src/cu_stream.cu
+    src/cu_stream.cu
   )
   target_include_directories(tensor_bandwidth_bench
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/tensor/include
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
   if(TARGET benchmark::benchmark)
     target_link_libraries(tensor_bandwidth_bench PRIVATE CUDA::cudart benchmark::benchmark)
