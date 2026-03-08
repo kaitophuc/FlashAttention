@@ -43,7 +43,7 @@ inline bool can_use_async_pool_cached() {
 }
 
 // A simple allocator that manages a single contiguous block of memory on the GPU.
-auto allocate_device(size_t bytes) -> void* {
+inline auto allocate_device(size_t bytes) -> void* {
     void* ptr;
     if (can_use_async_pool_cached()) {
         auto current_stream = get_current_stream();
@@ -55,7 +55,7 @@ auto allocate_device(size_t bytes) -> void* {
 }
 
 // Explicitly specify stream for allocation.
-auto allocate_device(size_t bytes, Stream& stream) -> void* {
+inline auto allocate_device(size_t bytes, Stream& stream) -> void* {
     void* ptr;
     if (can_use_async_pool_cached()) {
         CUDA_CHECK(cudaMallocAsync(&ptr, bytes, stream.s));
@@ -66,7 +66,7 @@ auto allocate_device(size_t bytes, Stream& stream) -> void* {
 }
 
 // A simple deallocator for GPU memory.
-void deallocate_device(void* ptr) {
+inline void deallocate_device(void* ptr) {
     if (can_use_async_pool_cached()) {
         auto current_stream = get_current_stream();
         CUDA_CHECK(cudaFreeAsync(ptr, current_stream));
@@ -76,7 +76,7 @@ void deallocate_device(void* ptr) {
 }
 
 // Explicitly specify stream for deallocation.
-void deallocate_device(void* ptr, Stream& stream) {
+inline void deallocate_device(void* ptr, Stream& stream) {
     if (can_use_async_pool_cached()) {
         CUDA_CHECK(cudaFreeAsync(ptr, stream.s));
     } else {
@@ -85,12 +85,12 @@ void deallocate_device(void* ptr, Stream& stream) {
 }
 
 // A simple allocator that manages pinned host memory.
-auto allocate_host(size_t bytes) -> void* {
+inline auto allocate_host(size_t bytes) -> void* {
     void* ptr;
     CUDA_CHECK(cudaMallocHost(&ptr, bytes));
     return ptr;
 }
 
-void deallocate_host(void* ptr) {
+inline void deallocate_host(void* ptr) {
     CUDA_CHECK(cudaFreeHost(ptr));
 }

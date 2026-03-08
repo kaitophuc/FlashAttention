@@ -3,6 +3,9 @@
 #include <cuda_runtime.h>
 #include "cu_check.h"
 
+cudaStream_t get_current_stream(int device = -1);
+void set_current_stream(cudaStream_t stream, int device = -1);
+
 // A simple wrapper around cudaStream_t for RAII management.
 struct Stream {
     cudaStream_t s;
@@ -10,6 +13,7 @@ struct Stream {
 
     Stream () : owns_(true) {
         CUDA_CHECK(cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking));
+        set_current_stream(s);
     }
 
     explicit Stream(cudaStream_t stream) : s(stream), owns_(false) {}
@@ -61,9 +65,6 @@ inline float elapsed_time(Event& start, Event& end) {
     CUDA_CHECK(cudaEventElapsedTime(&ms, start.e, end.e));
     return ms;
 }
-
-cudaStream_t get_current_stream(int device = -1);
-void set_current_stream(cudaStream_t stream, int device = -1);
 
 struct StreamGuard {
     cudaStream_t stream_;

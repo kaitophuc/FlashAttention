@@ -26,7 +26,7 @@ if [[ $# -gt 0 ]]; then
   bin_args=("$@")
 fi
 
-target="tensor_tests"
+target=""
 if [[ -n "$source_file" ]]; then
   if [[ ! -f "$source_file" ]]; then
     echo "error: file not found: $source_file" >&2
@@ -45,12 +45,13 @@ if [[ -n "$source_file" ]]; then
 
   basename_file="$(basename "$source_file")"
   case "$basename_file" in
-    test_tensor.cu) target="tensor_tests" ;;
     smoke_main.cpp) target="flashattn_smoke" ;;
     *)
-      stem="${basename_file%.*}"
+      stem="${source_file#tests/}"
+      stem="${stem%.*}"
+      stem="${stem//\//_}"
       if [[ "$stem" == test_* ]]; then
-        target="${stem#test_}_tests"
+        target="fa_test_${stem}"
       else
         target="$stem"
       fi
@@ -59,5 +60,16 @@ if [[ -n "$source_file" ]]; then
 fi
 
 cmake -S . -B build
-cmake --build build --target "$target" -j
-"./build/$target" "${bin_args[@]}"
+if [[ -z "$target" ]]; then
+  if [[ ${#bin_args[@]} -gt 0 ]]; then
+    echo "error: binary args require an explicit test source file" >&2
+    usage
+    exit 1
+  fi
+  # Build all targets first so gtest_discover_tests entries have backing executables.
+  cmake --build build -j
+  ctest --test-dir build --output-on-failure
+else
+  cmake --build build --target "$target" -j
+  "./build/$target" "${bin_args[@]}"
+fi
