@@ -17,6 +17,7 @@ bench/run.sh -- <binary-args...>
 
 ```bash
 bench/run.sh bench/tensor_bandwidth_bench.cu
+bench/run.sh bench/linear_forward_bench.cu
 bench/run.sh bench/tensor_bandwidth_bench.cu -- --iters=50
 bench/run.sh bench/tensor_bandwidth_bench.cu -- --benchmark_filter=BM_CopyD2D
 bench/run.sh -- --benchmark_filter=BM_CopyD2D
@@ -25,6 +26,7 @@ bench/run.sh -- --benchmark_filter=BM_CopyD2D
 ## Mapping
 
 - `bench/tensor_bandwidth_bench.cu` -> `tensor_bandwidth_bench`
+- `bench/linear_forward_bench.cu` -> `linear_forward_bench`
 - Fallback: `bench/xxx.cu` -> `xxx`
 
 If a new benchmark file uses a different target name, update `bench/run.sh`.
@@ -43,3 +45,23 @@ cmake -S . -B build -DFA_AUTO_FETCH_BENCHMARK=OFF
 ```
 
 If auto-fetch is disabled, install system package manually (e.g. `libbenchmark-dev`).
+
+## Linear vs PyTorch Compare
+
+Run native CUDA linear forward benchmark and compare with PyTorch:
+
+```bash
+bench/run_linear_compare.sh
+```
+
+Outputs:
+
+- `bench/results/native_linear.csv`
+- `bench/results/torch_linear.csv`
+- `bench/results/linear_compare.csv`
+
+Config knobs (optional environment variables):
+
+- `FA_LINEAR_SHAPES` (default `bench/linear_shapes.csv`)
+- `FA_LINEAR_WARMUP` (default `50`)
+- `FA_LINEAR_ITERS` (default `200`)

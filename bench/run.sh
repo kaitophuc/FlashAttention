@@ -9,6 +9,7 @@ usage() {
   echo "Examples:"
   echo "  bench/run.sh"
   echo "  bench/run.sh bench/tensor_bandwidth_bench.cu"
+  echo "  bench/run.sh bench/linear_forward_bench.cu"
   echo "  bench/run.sh -- --benchmark_filter=BM_CopyD2D"
 }
 
@@ -54,9 +55,9 @@ fi
 
 cmake -S . -B build
 targets_help="$(cmake --build build --target help 2>/dev/null || true)"
-if [[ "$targets_help" != *"tensor_bandwidth_bench"* ]]; then
-  echo "error: tensor_bandwidth_bench target is unavailable." >&2
-  echo "hint: install Google Benchmark (e.g. libbenchmark-dev) and reconfigure." >&2
+if [[ "$targets_help" != *"$target"* ]]; then
+  echo "error: benchmark target '$target' is unavailable." >&2
+  echo "hint: install Google Benchmark and reconfigure." >&2
   exit 1
 fi
 cmake --build build --target "$target" -j
