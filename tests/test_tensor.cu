@@ -1,5 +1,6 @@
 #include "allocator.h"
 #include "cu_stream.h"
+#include "general.h"
 #include "tensor.h"
 
 #include <gtest/gtest.h>
@@ -14,14 +15,8 @@
 
 namespace {
 
-bool cuda_available() {
-    int device_count = 0;
-    const cudaError_t err = cudaGetDeviceCount(&device_count);
-    return err == cudaSuccess && device_count > 0;
-}
-
 TEST(TensorCorrectness, AllocFreeStress) {
-    if (!cuda_available()) {
+    if (!fa_test::cuda_available()) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
@@ -66,7 +61,7 @@ TEST(TensorCorrectness, AllocFreeStress) {
 }
 
 TEST(TensorCorrectness, H2DAndD2HRoundTrip) {
-    if (!cuda_available()) {
+    if (!fa_test::cuda_available()) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 

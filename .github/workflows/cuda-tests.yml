@@ -1,0 +1,36 @@
+name: CUDA Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  cuda-tests:
+    name: CUDA Smoke + Concurrency
+    runs-on: [self-hosted, linux, x64, gpu, cuda]
+    env:
+      FA_REQUIRE_CUDA_TESTS: '1'
+      FA_CUDA_ARCHITECTURES: native
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Smoke Tier
+        run: tests/run.sh --label smoke
+      - name: Run Concurrency Tier
+        run: tests/run.sh --label concurrency
+
+  cuda-long-stress:
+    name: CUDA Long Stress (Optional Tier)
+    runs-on: [self-hosted, linux, x64, gpu, cuda]
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      FA_REQUIRE_CUDA_TESTS: '1'
+      FA_ENABLE_LONG_STRESS: '1'
+      FA_CUDA_ARCHITECTURES: native
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Stress Tier
+        run: tests/run.sh --label stress

@@ -6,15 +6,21 @@
 #include "cublass_handle.h"
 #include <stdexcept>
 #include <utility>
+#include <optional>
 
 struct LinearCtx {
     const Tensor* X;
     const Tensor* W;
+    bool has_bias;
+    int64_t m, n, k;
 };    
 struct LinearGrads {
-    Tensor dX;
-    Tensor dW;
-    Tensor db; // Optional, may be empty if b was not provided.
+    std::optional<Tensor> dX;
+    std::optional<Tensor> dW;
+    std::optional<Tensor> db; // Optional, may be empty if b was not provided.
+    bool has_dX;
+    bool has_dW;
+    bool has_db;
 };
 
 struct LinearResults {
@@ -22,8 +28,11 @@ struct LinearResults {
     LinearCtx ctx;
 };
 
+// Stream/handle contract for linear ops:
+// - `stream` must be non-null and must not be the default CUDA stream.
+// - Concurrent host launches sharing one CublasHandle are supported and internally synchronized.
 LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream* stream, CublasHandle& cublas_handle); //const
-LinearGrads linear_backward(const Tensor& dY, const Tensor& X, const Tensor& W, const Tensor* b, Stream* stream); //const
+LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_dX, bool needs_dW, bool needs_db, Stream* stream, CublasHandle& cublas_handle); //const
 
 
 struct LayerNormGrads {

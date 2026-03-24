@@ -61,6 +61,16 @@ struct Tensor {
         }
     }
 
+    Tensor(std::vector<int64_t> shape, DType dtype, Device device) {
+        // Constructor when stream is not provided. Use the current stream for CUDA tensors.
+        if (device == Device::CUDA || device == Device::CPU) {
+            Stream current(get_current_stream());
+            *this = Tensor(std::move(shape), dtype, device, current);
+        } else {
+            throw std::invalid_argument("Unsupported device.");
+        }
+    }
+
     ~Tensor() {
         release();
     }
@@ -143,6 +153,20 @@ struct Tensor {
         return static_cast<const T*>(data_);
     }
 
+    template <typename T>
+    const std::vector<T> to_vector(Stream& stream) const {
+        if (!check_dtype_match<T>()) {
+            throw std::runtime_error("Requested dtype does not match tensor dtype.");
+        }
+        std::vector<T> host_data(numel_);
+        if (device_ == Device::CUDA) {
+            CUDA_CHECK(cudaMemcpyAsync(host_data.data(), data_, nbytes_, cudaMemcpyDeviceToHost, stream.s));
+        } else {
+            std::memcpy(host_data.data(), data_, nbytes_);
+        }
+        return host_data;
+    }
+
     bool is_contiguous() const {
         // Check if the tensor is contiguous in memory.
         size_t expected_stride = 1;
@@ -200,6 +224,14 @@ struct Tensor {
         return cloned;
     }
 
+    void zero_(Stream& stream) {
+        if (device_ == Device::CUDA) {
+            CUDA_CHECK(cudaMemsetAsync(data_, 0, nbytes_, stream.s));
+        } else {
+            std::memset(data_, 0, nbytes_);
+        }
+    }
+
     void zero_() {
         if (device_ == Device::CUDA) {
             CUDA_CHECK(cudaMemsetAsync(data_, 0, nbytes_, get_current_stream()));
@@ -230,6 +262,21 @@ struct Tensor {
             CUDA_CHECK(cudaMemcpyAsync(data_, src.data_, nbytes_, kind, stream.s));
         } else {
             std::memcpy(data_, src.data_, nbytes_);
+        }
+    }
+
+    template <typename T>
+    void copy_from(const std::vector<T>& src, Stream& stream) {
+        if (!check_dtype_match<T>()) {
+            throw std::runtime_error("Requested dtype does not match tensor dtype.");
+        }
+        if (src.size() != numel_) {
+            throw std::invalid_argument("Source vector size must match the number of elements in the tensor.");
+        }
+        if (device_ == Device::CUDA) {
+            CUDA_CHECK(cudaMemcpyAsync(data_, src.data(), src.size() * sizeof(T), cudaMemcpyHostToDevice, stream.s));
+        } else {
+            std::memcpy(data_, src.data(), nbytes_);
         }
     }
 

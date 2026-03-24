@@ -22,6 +22,7 @@ Target: CUDA + C++ (optionally a small Python wrapper only for data loading + pl
   - `train/`: optimizer, dataloader, training loop
 - `include/`: shared headers (`*.h`, `*.hpp`)
 - `tests/`: unit tests + gradient checks
+  - `tests/include/`: shared test helpers (e.g., CUDA availability checks, linear test fixtures)
 - `bench/`: microbench + throughput benchmarks
 - `tools/`: reference implementation helpers (PyTorch validation, plotting)
 
@@ -52,6 +53,8 @@ Filter a single gtest case:
 ```bash
 tests/run.sh -- --gtest_filter=TensorCorrectness.H2DAndD2HRoundTrip
 ```
+
+Reusable test-only helpers now live under `tests/include/` and are shared across test sources.
 
 ### Run benchmarks (Google Benchmark)
 

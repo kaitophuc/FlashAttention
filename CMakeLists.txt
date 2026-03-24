@@ -7,14 +7,53 @@ set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  # Reasonable defaults for Ampere/Hopper class GPUs; override via -DCMAKE_CUDA_ARCHITECTURES=...
-  set(CMAKE_CUDA_ARCHITECTURES 80 86 89 90)
+  # Reasonable defaults for Ampere/Hopper/Blackwell class GPUs; override via -DCMAKE_CUDA_ARCHITECTURES=...
+  set(CMAKE_CUDA_ARCHITECTURES 80 86 89 90 120)
 endif()
 
 find_package(CUDAToolkit REQUIRED)
-find_package(GTest REQUIRED)
-find_package(benchmark QUIET)
 find_package(Git QUIET)
+find_package(GTest QUIET)
+find_package(benchmark QUIET)
+
+if(GTest_FOUND)
+  message(STATUS "GoogleTest found on system. Skipping download.")
+else()
+  if(NOT GIT_FOUND)
+    message(FATAL_ERROR "GoogleTest missing and git is unavailable; cannot download GoogleTest.")
+  endif()
+
+  message(STATUS "GoogleTest not found. Downloading from source...")
+  set(_fa_gtest_src_dir "${CMAKE_BINARY_DIR}/_deps/googletest-src")
+  if(NOT EXISTS "${_fa_gtest_src_dir}/CMakeLists.txt")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" clone --depth 1 --branch v1.14.0 https://github.com/google/googletest.git googletest-src
+      WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/_deps"
+      RESULT_VARIABLE _fa_gtest_clone_result
+      OUTPUT_QUIET
+      ERROR_VARIABLE _fa_gtest_clone_error
+    )
+  else()
+    set(_fa_gtest_clone_result 0)
+  endif()
+
+  if(NOT _fa_gtest_clone_result EQUAL 0 OR NOT EXISTS "${_fa_gtest_src_dir}/CMakeLists.txt")
+    message(FATAL_ERROR "Failed to download GoogleTest: ${_fa_gtest_clone_error}")
+  endif()
+
+  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+  add_subdirectory(
+    "${_fa_gtest_src_dir}"
+    "${CMAKE_BINARY_DIR}/_deps/googletest-build"
+    EXCLUDE_FROM_ALL
+  )
+
+  if(NOT TARGET GTest::gtest_main)
+    message(FATAL_ERROR "GoogleTest downloaded but target GTest::gtest_main is unavailable.")
+  endif()
+  message(STATUS "GoogleTest downloaded and enabled.")
+endif()
 
 add_library(flashattention_common INTERFACE)
 target_include_directories(flashattention_common
@@ -127,6 +166,10 @@ foreach(_test_src IN LISTS FA_TEST_SOURCES)
   set(_test_target "fa_test_${_test_target}")
 
   add_executable(${_test_target} "${_test_src}")
+  target_include_directories(${_test_target}
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/include
+  )
   if(TARGET flashattention_core)
     target_link_libraries(${_test_target} PRIVATE flashattention_core)
   endif()
@@ -195,6 +238,27 @@ foreach(_test_src IN LISTS FA_TEST_SOURCES)
   string(REPLACE ".cpp" "" _test_target "${_test_target}")
   set(_test_target "fa_test_${_test_target}")
   if(TARGET "${_test_target}")
-    gtest_discover_tests(${_test_target})
+    set(_fa_discovered_tests)
+    gtest_discover_tests(${_test_target}
+      NO_PRETTY_VALUES
+      NO_PRETTY_TYPES
+      TEST_LIST _fa_discovered_tests
+    )
+    foreach(_one_test IN LISTS _fa_discovered_tests)
+      set(_labels "all")
+      if(_one_test MATCHES "^LinearForward\\.")
+        list(APPEND _labels "linear")
+      endif()
+      if(_one_test MATCHES "Rejects|SweepAllCases|Invariant|Numeric|SingleStream")
+        list(APPEND _labels "smoke")
+      endif()
+      if(_one_test MATCHES "Concurrency|CublasHandleMatrix")
+        list(APPEND _labels "concurrency")
+      endif()
+      if(_one_test MATCHES "Stress")
+        list(APPEND _labels "stress")
+      endif()
+      set_tests_properties(${_one_test} PROPERTIES LABELS "${_labels}")
+    endforeach()
   endif()
 endforeach()
