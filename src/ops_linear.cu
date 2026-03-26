@@ -19,15 +19,17 @@ __global__ void compute_db_kernel(const float* __restrict__ dY,
     int M,
     int N) {
     const int col = blockIdx.y * BLOCK_X + threadIdx.x;
-    if (col >= N) return;
+    const bool col_in_range = (col < N);
 
     const int row_tile_start = blockIdx.x * (BLOCK_Y * ROWS_PER_THREAD);
     const int row_tile_end = min(M, row_tile_start + BLOCK_Y * ROWS_PER_THREAD);
 
     float sum = 0.0f;
     // Each (threadIdx.x, threadIdx.y) walks rows in its lane.
-    for (int row = row_tile_start + threadIdx.y; row < row_tile_end; row += BLOCK_Y) {
-        sum += dY[static_cast<size_t>(row) * N + col];
+    if (col_in_range) {
+        for (int row = row_tile_start + threadIdx.y; row < row_tile_end; row += BLOCK_Y) {
+            sum += dY[static_cast<size_t>(row) * N + col];
+        }
     }
 
     // Reduce across threadIdx.y for each fixed threadIdx.x (column).
@@ -43,7 +45,7 @@ __global__ void compute_db_kernel(const float* __restrict__ dY,
     }
 
     // One writer per column per block.
-    if (threadIdx.y == 0) {
+    if (col_in_range && threadIdx.y == 0) {
         atomicAdd(&db[col], smem[0][threadIdx.x]);
     }
 }

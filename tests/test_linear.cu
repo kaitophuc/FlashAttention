@@ -65,6 +65,158 @@ std::vector<float> RunForwardToHost(const Tensor& x_h,
     return y_h.to_vector<float>();
 }
 
+void ReferenceLinearBackward(const std::vector<float>& x,
+                             const std::vector<float>& w,
+                             const std::vector<float>& dY,
+                             int m,
+                             int k,
+                             int n,
+                             std::vector<float>& dX,
+                             std::vector<float>& dW,
+                             std::vector<float>& db) {
+    dX.assign(static_cast<size_t>(m) * k, 0.0f);
+    dW.assign(static_cast<size_t>(n) * k, 0.0f);
+    db.assign(static_cast<size_t>(n), 0.0f);
+
+    for (int i = 0; i < m; ++i) {
+        for (int t = 0; t < k; ++t) {
+            double acc = 0.0;
+            for (int j = 0; j < n; ++j) {
+                acc += static_cast<double>(dY[static_cast<size_t>(i) * n + j]) *
+                       static_cast<double>(w[static_cast<size_t>(j) * k + t]);
+            }
+            dX[static_cast<size_t>(i) * k + t] = static_cast<float>(acc);
+        }
+    }
+
+    for (int j = 0; j < n; ++j) {
+        for (int t = 0; t < k; ++t) {
+            double acc = 0.0;
+            for (int i = 0; i < m; ++i) {
+                acc += static_cast<double>(dY[static_cast<size_t>(i) * n + j]) *
+                       static_cast<double>(x[static_cast<size_t>(i) * k + t]);
+            }
+            dW[static_cast<size_t>(j) * k + t] = static_cast<float>(acc);
+        }
+    }
+
+    for (int j = 0; j < n; ++j) {
+        double acc = 0.0;
+        for (int i = 0; i < m; ++i) {
+            acc += static_cast<double>(dY[static_cast<size_t>(i) * n + j]);
+        }
+        db[static_cast<size_t>(j)] = static_cast<float>(acc);
+    }
+}
+
+TEST(LinearBackward, MatchesReferenceAllGradsOddN) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    constexpr int m = 13;
+    constexpr int n = 37;
+    constexpr int k = 19;
+    constexpr float abs_tol = 1e-4f;
+    constexpr float rel_tol = 1e-4f;
+
+    const uint32_t seed = fa_test::MixSeed(fa_test::kLinearSeedBase, m, n, k, 101);
+    fa_test::HostLinearInputs<float> inputs(m, n, k, true, -1.0f, 1.0f, seed);
+    ASSERT_TRUE(inputs.b_h.has_value());
+
+    std::mt19937 rng(seed + 17u);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> dY_ref(static_cast<size_t>(m) * n);
+    for (float& v : dY_ref) v = dist(rng);
+
+    Stream stream;
+    CublasHandle handle;
+    Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
+    Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
+    Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
+
+    LinearResults out = linear_forward(x_d, w_d, &b_d, &stream, handle);
+
+    Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
+    Tensor dY_d = dY_h.clone(Device::CUDA, stream);
+
+    LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, true, &stream, handle);
+    ASSERT_TRUE(grads.has_dX);
+    ASSERT_TRUE(grads.has_dW);
+    ASSERT_TRUE(grads.has_db);
+    ASSERT_TRUE(grads.dX.has_value());
+    ASSERT_TRUE(grads.dW.has_value());
+    ASSERT_TRUE(grads.db.has_value());
+
+    Tensor dX_h = grads.dX->clone(Device::CPU);
+    Tensor dW_h = grads.dW->clone(Device::CPU);
+    Tensor db_h = grads.db->clone(Device::CPU);
+    stream.synchronize();
+
+    std::vector<float> dX_expected, dW_expected, db_expected;
+    ReferenceLinearBackward(inputs.x_ref, inputs.w_ref, dY_ref, m, k, n,
+                            dX_expected, dW_expected, db_expected);
+
+    ExpectVectorNear(dX_h.to_vector<float>(), dX_expected, abs_tol, rel_tol,
+                     ReproTag("backward_dx", seed, m, n, k));
+    ExpectVectorNear(dW_h.to_vector<float>(), dW_expected, abs_tol, rel_tol,
+                     ReproTag("backward_dw", seed, m, n, k));
+    ExpectVectorNear(db_h.to_vector<float>(), db_expected, abs_tol, rel_tol,
+                     ReproTag("backward_db", seed, m, n, k));
+}
+
+TEST(LinearBackward, NeedsDbIgnoredWhenForwardHadNoBias) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    constexpr int m = 9;
+    constexpr int n = 11;
+    constexpr int k = 7;
+
+    const uint32_t seed = fa_test::MixSeed(fa_test::kLinearSeedBase, m, n, k, 102);
+    fa_test::HostLinearInputs<float> inputs(m, n, k, false, -1.0f, 1.0f, seed);
+
+    std::mt19937 rng(seed + 23u);
+    std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
+    std::vector<float> dY_ref(static_cast<size_t>(m) * n);
+    for (float& v : dY_ref) v = dist(rng);
+
+    Stream stream;
+    CublasHandle handle;
+    Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
+    Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
+    LinearResults out = linear_forward(x_d, w_d, nullptr, &stream, handle);
+
+    Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
+    Tensor dY_d = dY_h.clone(Device::CUDA, stream);
+
+    LinearGrads grads = linear_backward(dY_d, out.ctx, false, false, true, &stream, handle);
+    EXPECT_FALSE(grads.has_dX);
+    EXPECT_FALSE(grads.has_dW);
+    EXPECT_FALSE(grads.has_db);
+    EXPECT_FALSE(grads.dX.has_value());
+    EXPECT_FALSE(grads.dW.has_value());
+    EXPECT_FALSE(grads.db.has_value());
+}
+
+TEST(LinearBackward, RejectsDYShapeMismatch) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    Stream stream;
+    CublasHandle handle;
+
+    Tensor x({5, 4}, DType::F32, Device::CUDA, stream);
+    Tensor w({3, 4}, DType::F32, Device::CUDA, stream);
+    LinearResults out = linear_forward(x, w, nullptr, &stream, handle);
+
+    Tensor dY_bad({6, 3}, DType::F32, Device::CUDA, stream);
+    EXPECT_THROW((void)linear_backward(dY_bad, out.ctx, true, true, false, &stream, handle),
+                 std::invalid_argument);
+}
+
 TEST(LinearForward, RejectsNon2DX) {
     if (!fa_test::cuda_available()) {
         GTEST_SKIP() << "CUDA runtime unavailable";
