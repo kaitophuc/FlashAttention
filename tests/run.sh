@@ -113,12 +113,12 @@ if [[ -n "$label" && "$label" != "all" && -n "$target" ]]; then
     exit 1
   fi
 
-  case "$label" in
-    smoke)
-      bin_args+=("--gtest_filter=LinearForward.Rejects*:LinearForward.SweepAllCases:LinearForward.Numeric*:LinearForward.Invariant*:TensorCorrectness.*")
+    case "$label" in
+      smoke)
+      bin_args+=("--gtest_filter=LinearForward.Rejects*:LinearForward.SweepAllCases:LinearForward.Numeric*:LinearForward.Invariant*:LinearBackward.MatchesReference*:LinearBackward.SweepAllCases:LinearBackward.NeedsDb*:LinearBackward.Rejects*:LinearBackward.FiniteDifference*:LinearBackward.NeedsGradFlags*:TensorCorrectness.*")
       ;;
-    stress)
-      bin_args+=("--gtest_filter=LinearForward.SingleStreamOrderingReuseStress*")
+      stress)
+      bin_args+=("--gtest_filter=LinearForward.SingleStreamOrderingReuseStress*:LinearBackward.SingleStreamOrderingReuseStress*")
       ;;
   esac
 fi

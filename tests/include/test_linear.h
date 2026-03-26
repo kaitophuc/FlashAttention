@@ -69,6 +69,17 @@ struct LinearCase {
     const char* name;
 };
 
+struct LinearBackwardCase {
+    int m, n, k;
+    bool with_bias;
+    Dist dist;
+    float lo, hi;
+    float abs_tol;
+    float rel_tol;
+    int iters;
+    const char* name;
+};
+
 inline const char* DistName(Dist d) {
     switch (d) {
         case Dist::Uniform: return "uniform";
@@ -96,6 +107,33 @@ inline std::vector<LinearCase> BuildCases() {
         const char* name = std::get<3>(s);
 
         const int iters = (m * n * k < 1000000) ? 10 : 3;
+        for (bool with_bias : {false, true}) {
+            out.push_back({m, n, k, with_bias, Dist::Uniform, -1.0f, 1.0f, 1e-4f, 1e-4f, iters, name});
+            out.push_back({m, n, k, with_bias, Dist::NearZero, -1e-6f, 1e-6f, 1e-7f, 1e-4f, iters, name});
+            out.push_back({m, n, k, with_bias, Dist::MixedLarge, -100.0f, 100.0f, 1.5e-1f, 1e-3f, iters, name});
+        }
+    }
+    return out;
+}
+
+inline std::vector<LinearBackwardCase> BuildBackwardCases() {
+    const std::vector<std::tuple<int, int, int, const char*>> shapes = {
+        {1, 1, 1, "tiny_111"},
+        {1, 7, 3, "tiny_173"},
+        {5, 1, 9, "tiny_519"},
+        {37, 53, 29, "prime_375329"},
+        {200, 300, 400, "med_200300400"},
+        {512, 768, 1024, "large_5127681024"},
+    };
+
+    std::vector<LinearBackwardCase> out;
+    for (const auto& s : shapes) {
+        const int m = std::get<0>(s);
+        const int n = std::get<1>(s);
+        const int k = std::get<2>(s);
+        const char* name = std::get<3>(s);
+        const int iters = (m * n * k < 1000000) ? 10 : 3;
+
         for (bool with_bias : {false, true}) {
             out.push_back({m, n, k, with_bias, Dist::Uniform, -1.0f, 1.0f, 1e-4f, 1e-4f, iters, name});
             out.push_back({m, n, k, with_bias, Dist::NearZero, -1e-6f, 1e-6f, 1e-7f, 1e-4f, iters, name});
@@ -167,12 +205,69 @@ struct ShapeCfg {
     bool with_bias;
 };
 
+struct ForwardEdgeCase {
+    const char* name;
+    int m;
+    int n;
+    int k;
+    bool with_bias;
+    float abs_tol;
+    float rel_tol;
+    std::vector<float> x;
+    std::vector<float> w;
+    std::vector<float> b;
+};
+
+struct BackwardShapeCfg {
+    int m, n, k;
+    float lo, hi;
+    float abs_tol, rel_tol;
+    bool with_bias;
+};
+
+struct QueuedLinearBackwardJob {
+    int m, n, k;
+    bool with_bias;
+    float abs_tol, rel_tol;
+
+    Tensor x_d;
+    Tensor w_d;
+    std::optional<Tensor> b_d;
+    Tensor dY_d;
+
+    std::optional<Tensor> dX_h;
+    std::optional<Tensor> dW_h;
+    std::optional<Tensor> db_h;
+
+    std::vector<float> dX_expected;
+    std::vector<float> dW_expected;
+    std::vector<float> db_expected;
+};
+
 inline std::vector<float> reference_linear(const std::vector<float>& x,
                                            const std::vector<float>& w,
                                            const std::vector<float>* b,
                                            int m,
                                            int k,
                                            int n);
+
+inline void reference_linear_backward(const std::vector<float>& x,
+                                      const std::vector<float>& w,
+                                      const std::vector<float>& dY,
+                                      int m,
+                                      int k,
+                                      int n,
+                                      std::vector<float>& dX,
+                                      std::vector<float>& dW,
+                                      std::vector<float>& db);
+
+inline std::vector<float> SampleUniformVector(size_t n, float lo, float hi, uint32_t seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(lo, hi);
+    std::vector<float> out(n);
+    for (float& v : out) v = dist(rng);
+    return out;
+}
 
 inline std::vector<float> reference_linear(const std::vector<float>& x,
                                            const std::vector<float>& w,
@@ -195,6 +290,50 @@ inline std::vector<float> reference_linear(const std::vector<float>& x,
         }
     }
     return y;
+}
+
+inline void reference_linear_backward(const std::vector<float>& x,
+                                      const std::vector<float>& w,
+                                      const std::vector<float>& dY,
+                                      int m,
+                                      int k,
+                                      int n,
+                                      std::vector<float>& dX,
+                                      std::vector<float>& dW,
+                                      std::vector<float>& db) {
+    dX.assign(static_cast<size_t>(m) * k, 0.0f);
+    dW.assign(static_cast<size_t>(n) * k, 0.0f);
+    db.assign(static_cast<size_t>(n), 0.0f);
+
+    for (int i = 0; i < m; ++i) {
+        for (int t = 0; t < k; ++t) {
+            double acc = 0.0;
+            for (int j = 0; j < n; ++j) {
+                acc += static_cast<double>(dY[static_cast<size_t>(i) * n + j]) *
+                       static_cast<double>(w[static_cast<size_t>(j) * k + t]);
+            }
+            dX[static_cast<size_t>(i) * k + t] = static_cast<float>(acc);
+        }
+    }
+
+    for (int j = 0; j < n; ++j) {
+        for (int t = 0; t < k; ++t) {
+            double acc = 0.0;
+            for (int i = 0; i < m; ++i) {
+                acc += static_cast<double>(dY[static_cast<size_t>(i) * n + j]) *
+                       static_cast<double>(x[static_cast<size_t>(i) * k + t]);
+            }
+            dW[static_cast<size_t>(j) * k + t] = static_cast<float>(acc);
+        }
+    }
+
+    for (int j = 0; j < n; ++j) {
+        double acc = 0.0;
+        for (int i = 0; i < m; ++i) {
+            acc += static_cast<double>(dY[static_cast<size_t>(i) * n + j]);
+        }
+        db[static_cast<size_t>(j)] = static_cast<float>(acc);
+    }
 }
 
 static void ValidateQueuedJobs(const std::vector<QueuedLinearJob>& jobs) {
@@ -237,6 +376,80 @@ static void ValidateQueuedJobs(const std::vector<QueuedLinearJob>& jobs) {
     if (!failures.empty()) {
         std::ostringstream all;
         all << "Queued linear validation failed in " << failures.size() << " job(s):\n";
+        for (const auto& f : failures) all << "  " << f << "\n";
+        ADD_FAILURE() << all.str();
+    }
+}
+
+static void ValidateQueuedBackwardJobs(const std::vector<QueuedLinearBackwardJob>& jobs) {
+    std::vector<std::string> failures;
+    for (size_t job_idx = 0; job_idx < jobs.size(); ++job_idx) {
+        const auto& j = jobs[job_idx];
+        if (!j.dX_h.has_value() || !j.dW_h.has_value()) {
+            std::ostringstream os;
+            os << "Backward job " << job_idx << " missing dX or dW buffers";
+            failures.push_back(os.str());
+            continue;
+        }
+
+        auto check_tensor = [&](const Tensor& t,
+                                const std::vector<float>& expected,
+                                const char* label) {
+            const std::vector<float> got = t.to_vector<float>();
+            if (got.size() != expected.size()) {
+                std::ostringstream os;
+                os << "Backward job " << job_idx << " " << label << " size mismatch: got "
+                   << got.size() << " expected " << expected.size();
+                failures.push_back(os.str());
+                return;
+            }
+
+            int fail_count = 0;
+            float worst_abs_error = 0.0f;
+            float worst_tol = 0.0f;
+            int worst_i = -1;
+            for (size_t i = 0; i < got.size(); ++i) {
+                const float e = expected[i];
+                const float abs_error = std::fabs(got[i] - e);
+                const float tol = j.abs_tol + j.rel_tol * std::fabs(e);
+                if (abs_error > tol) {
+                    ++fail_count;
+                    if (abs_error > worst_abs_error) {
+                        worst_abs_error = abs_error;
+                        worst_tol = tol;
+                        worst_i = static_cast<int>(i);
+                    }
+                }
+            }
+
+            if (fail_count > 0) {
+                std::ostringstream os;
+                os << "Backward job " << job_idx << " " << label << " failed: " << fail_count
+                   << "/" << got.size() << " elements exceeded tolerance. Worst idx " << worst_i
+                   << " got=" << got[static_cast<size_t>(worst_i)]
+                   << " expected=" << expected[static_cast<size_t>(worst_i)]
+                   << " abs error=" << worst_abs_error << " tol=" << worst_tol;
+                failures.push_back(os.str());
+            }
+        };
+
+        check_tensor(j.dX_h.value(), j.dX_expected, "dX");
+        check_tensor(j.dW_h.value(), j.dW_expected, "dW");
+
+        if (j.with_bias) {
+            if (!j.db_h.has_value()) {
+                std::ostringstream os;
+                os << "Backward job " << job_idx << " missing db buffer";
+                failures.push_back(os.str());
+            } else {
+                check_tensor(j.db_h.value(), j.db_expected, "db");
+            }
+        }
+    }
+
+    if (!failures.empty()) {
+        std::ostringstream all;
+        all << "Queued backward linear validation failed in " << failures.size() << " check(s):\n";
         for (const auto& f : failures) all << "  " << f << "\n";
         ADD_FAILURE() << all.str();
     }
