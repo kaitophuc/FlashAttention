@@ -161,7 +161,6 @@ void benchmark_linear_forward(benchmark::State& state, const LinearCase* cfg) {
 
     Stream stream;
     CublasHandle cublas_handle;
-    cublas_handle.bind_stream(stream);
 
     Tensor x({cfg->m, cfg->k}, DType::F32, Device::CUDA, stream);
     Tensor w({cfg->n, cfg->k}, DType::F32, Device::CUDA, stream);

@@ -1,10 +1,11 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <stdexcept>
 #include "cu_check.h"
 
-cudaStream_t get_current_stream(int device = -1);
-void set_current_stream(cudaStream_t stream, int device = -1);
+//cudaStream_t get_current_stream(int device = -1);
+//void set_current_stream(cudaStream_t stream, int device = -1);
 
 // A simple wrapper around cudaStream_t for RAII management.
 struct Stream {
@@ -12,11 +13,18 @@ struct Stream {
     bool owns_;
 
     Stream () : owns_(true) {
-        CUDA_CHECK(cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking));
-        set_current_stream(s);
+        //CUDA_CHECK(cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking));
+        //set_current_stream(s);
+        s = cudaStream_t(0); // At this phase, let everything use the default stream
     }
 
-    explicit Stream(cudaStream_t stream) : s(stream), owns_(false) {}
+    explicit Stream(cudaStream_t stream) {
+        if (stream != cudaStream_t(0)) {
+            throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+        }
+        s = stream;
+        owns_ = false;
+    }
 
     ~Stream () {
         if (owns_ && s != nullptr) {
@@ -66,7 +74,7 @@ inline float elapsed_time(Event& start, Event& end) {
     return ms;
 }
 
-struct StreamGuard {
+/*struct StreamGuard {
     cudaStream_t stream_;
     cudaStream_t prev_stream_;
     int device_;
@@ -91,4 +99,4 @@ struct StreamGuard {
     // Prevent copying
     StreamGuard(const StreamGuard&) = delete;
     StreamGuard& operator=(const StreamGuard&) = delete;
-};
+};*/

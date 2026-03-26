@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <stdexcept>
 #include "cu_check.h"
 #include "cu_stream.h"
 
@@ -46,7 +47,7 @@ inline bool can_use_async_pool_cached() {
 inline auto allocate_device(size_t bytes) -> void* {
     void* ptr;
     if (can_use_async_pool_cached()) {
-        auto current_stream = get_current_stream();
+        auto current_stream = cudaStream_t(0);//get_current_stream();
         CUDA_CHECK(cudaMallocAsync(&ptr, bytes, current_stream));
     } else {
         CUDA_CHECK(cudaMalloc(&ptr, bytes));
@@ -56,6 +57,9 @@ inline auto allocate_device(size_t bytes) -> void* {
 
 // Explicitly specify stream for allocation.
 inline auto allocate_device(size_t bytes, Stream& stream) -> void* {
+    if (stream.s != cudaStream_t(0)) {
+        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+    }
     void* ptr;
     if (can_use_async_pool_cached()) {
         CUDA_CHECK(cudaMallocAsync(&ptr, bytes, stream.s));
@@ -68,7 +72,7 @@ inline auto allocate_device(size_t bytes, Stream& stream) -> void* {
 // A simple deallocator for GPU memory.
 inline void deallocate_device(void* ptr) {
     if (can_use_async_pool_cached()) {
-        auto current_stream = get_current_stream();
+        auto current_stream = cudaStream_t(0);//get_current_stream();
         CUDA_CHECK(cudaFreeAsync(ptr, current_stream));
     } else {
         CUDA_CHECK(cudaFree(ptr));
@@ -77,6 +81,9 @@ inline void deallocate_device(void* ptr) {
 
 // Explicitly specify stream for deallocation.
 inline void deallocate_device(void* ptr, Stream& stream) {
+    if (stream.s != cudaStream_t(0)) {
+        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+    }
     if (can_use_async_pool_cached()) {
         CUDA_CHECK(cudaFreeAsync(ptr, stream.s));
     } else {

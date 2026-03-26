@@ -6,7 +6,7 @@ namespace {
     thread_local std::map<int, cudaStream_t> current_streams;
 }
 
-cudaStream_t get_current_stream(int device) {
+/*cudaStream_t get_current_stream(int device) {
     if (device == -1) {
         CUDA_CHECK(cudaGetDevice(&device));
     }
@@ -26,4 +26,4 @@ void set_current_stream(cudaStream_t stream, int device) {
     }
     
     current_streams[device] = stream;
-}
+}*/

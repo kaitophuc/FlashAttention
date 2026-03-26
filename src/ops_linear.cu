@@ -49,15 +49,15 @@ __global__ void compute_db_kernel(const float* __restrict__ dY,
 }
 
 
-LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream* stream, CublasHandle& cublas_handle) {
+LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream* stream, CublasHandle& handle) {
     // Check input shapes and dtypes.
     // At this phase, assume all tensors are in Float32 for simplicity. In a full implementation, we would handle different dtypes and possibly mixed precision.
     // currently disable CPU support, so we can assume all tensors are on CUDA device.
     if (stream == nullptr) {
         throw std::invalid_argument("stream must not be null.");
     }
-    if (stream->s == cudaStream_t(0)) {
-        throw std::invalid_argument("stream must be a non-default CUDA stream.");
+    if (stream->s != cudaStream_t(0)) {
+        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
     }
     if (X.dtype_ != DType::F32 || W.dtype_ != DType::F32) {
         throw std::invalid_argument("Currently only Float32 dtype is supported for X and W.");
@@ -106,14 +106,12 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
     int lc = static_cast<int>(W.shape_[0]);
     float alpha = 1.0f;
     float beta = 0.0f;
-    cublas_handle.with_bound_stream(stream->s, [&](cublasHandle_t handle) {
-        CUBLAS_CHECK(cublasSgemm(handle, opA, opB, m_out, n_out, k_out,
-                                 &alpha,
-                                 static_cast<float*>(W.data_), la,
-                                 static_cast<float*>(X.data_), lb,
-                                 &beta,
-                                 static_cast<float*>(Y.data_), lc));
-    });
+    CUBLAS_CHECK(cublasSgemm(handle.get(), opA, opB, m_out, n_out, k_out,
+                                &alpha,
+                                static_cast<float*>(W.data_), la,
+                                static_cast<float*>(X.data_), lb,
+                                &beta,
+                                static_cast<float*>(Y.data_), lc));
 
     if (b != nullptr) {
         const int m = static_cast<int>(Y.shape_[0]);
@@ -130,13 +128,13 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
     return LinearResults{std::move(Y), LinearCtx{&X, &W, b != nullptr, X.shape_[0], W.shape_[0], X.shape_[1]}};
 }
 
-LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_dX, bool needs_dW, bool needs_db, Stream* stream, CublasHandle& cublas_handle) {
+LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_dX, bool needs_dW, bool needs_db, Stream* stream, CublasHandle& handle) {
     // Check input shapes and dtypes.
     if (stream == nullptr) {
         throw std::invalid_argument("stream must not be null.");
     }
-    if (stream->s == cudaStream_t(0)) {
-        throw std::invalid_argument("stream must be a non-default CUDA stream.");
+    if (stream->s != cudaStream_t(0)) {
+        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
     }
     if (ctx.X == nullptr || ctx.W == nullptr) {
         throw std::invalid_argument("LinearCtx contains null tensor pointers.");
@@ -191,14 +189,12 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
 
         float alpha = 1.0f;
         float beta = 0.0f;
-        cublas_handle.with_bound_stream(stream->s, [&](cublasHandle_t handle) {
-            CUBLAS_CHECK(cublasSgemm(handle, opA, opB, m_out, n_out, k_out,
-                                     &alpha,
-                                     static_cast<const float*>(ctx.W->data_), la,
-                                     static_cast<const float*>(dY.data_), lb,
-                                     &beta,
-                                     static_cast<float*>(dX.value().data_), lc));
-        });
+        CUBLAS_CHECK(cublasSgemm(handle.get(), opA, opB, m_out, n_out, k_out,
+                                    &alpha,
+                                    static_cast<const float*>(ctx.W->data_), la,
+                                    static_cast<const float*>(dY.data_), lb,
+                                    &beta,
+                                    static_cast<float*>(dX.value().data_), lc));
     }
     
     // Compute dW = dY^T * X
@@ -215,14 +211,12 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
         int lc = static_cast<int>(ctx.X->shape_[1]);
         float alpha = 1.0f;
         float beta = 0.0f;
-        cublas_handle.with_bound_stream(stream->s, [&](cublasHandle_t handle) {
-            CUBLAS_CHECK(cublasSgemm(handle, opA, opB, m_out, n_out, k_out,
-                                     &alpha,
-                                     static_cast<const float*>(ctx.X->data_), la,
-                                     static_cast<const float*>(dY.data_), lb,
-                                     &beta,
-                                     static_cast<float*>(dW.value().data_), lc));
-        });
+        CUBLAS_CHECK(cublasSgemm(handle.get(), opA, opB, m_out, n_out, k_out,
+                                    &alpha,
+                                    static_cast<const float*>(ctx.X->data_), la,
+                                    static_cast<const float*>(dY.data_), lb,
+                                    &beta,
+                                    static_cast<float*>(dW.value().data_), lc));
     }
 
     // Compute db = sum(dY, dim=0)

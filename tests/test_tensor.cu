@@ -68,9 +68,9 @@ TEST(TensorCorrectness, H2DAndD2HRoundTrip) {
     Stream stream(cudaStream_t(0));
 
     constexpr int64_t kN = 1LL << 20;  // 1M floats
-    Tensor h({kN}, DType::F32, Device::CPU, stream);
+    Tensor h({kN}, DType::F32, Device::CPU);
     Tensor d({kN}, DType::F32, Device::CUDA, stream);
-    Tensor h2({kN}, DType::F32, Device::CPU, stream);
+    Tensor h2({kN}, DType::F32, Device::CPU);
 
     auto* h_ptr = static_cast<float*>(h.data_);
     auto* h2_ptr = static_cast<float*>(h2.data_);
@@ -90,5 +90,117 @@ TEST(TensorCorrectness, H2DAndD2HRoundTrip) {
         EXPECT_NEAR(got, expected, kEps);
     }
 }
+
+TEST(TensorCorrectness, CloneCudaToCpu_NoSegfaultAndMatches) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Stream stream(cudaStream_t(0));
+
+    constexpr int64_t kN = 1LL << 20;  // 1M floats
+    Tensor h_src({kN}, DType::F32, Device::CPU);
+    auto* h_src_ptr = static_cast<float*>(h_src.data_);
+    for (int64_t i = 0; i < kN; ++i) {
+        h_src_ptr[i] = static_cast<float>(i) * 0.25f - 17.0f;
+    }
+
+    Tensor d = h_src.clone(Device::CUDA, stream);
+    stream.synchronize();
+
+    // This is the path that previously crashed when clone(Device::CPU) used memcpy on device ptr.
+    Tensor h_cloned = d.clone(Device::CPU);
+
+    auto* h_cloned_ptr = static_cast<float*>(h_cloned.data_);
+    constexpr float kEps = 1e-6f;
+    for (int64_t i = 0; i < kN; ++i) {
+        EXPECT_NEAR(h_cloned_ptr[i], h_src_ptr[i], kEps) << "idx=" << i;
+    }
+}
+
+TEST(TensorCorrectness, CloneCpuToCudaToCpu_RoundTrip) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Stream stream(cudaStream_t(0));
+
+    constexpr int64_t kN = 1LL << 20;  // 1M floats
+    Tensor h0({kN}, DType::F32, Device::CPU);
+    auto* h0_ptr = static_cast<float*>(h0.data_);
+    for (int64_t i = 0; i < kN; ++i) {
+        h0_ptr[i] = std::sin(static_cast<float>(i) * 0.001f);
+    }
+
+    Tensor d = h0.clone(Device::CUDA, stream);
+    stream.synchronize();
+
+    Tensor h1 = d.clone(Device::CPU);
+
+    auto* h1_ptr = static_cast<float*>(h1.data_);
+    constexpr float kEps = 1e-6f;
+    for (int64_t i = 0; i < kN; ++i) {
+        EXPECT_NEAR(h1_ptr[i], h0_ptr[i], kEps) << "idx=" << i;
+    }
+}
+
+TEST(TensorCorrectness, ToVectorFromCuda_IsSynchronized) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Stream stream(cudaStream_t(0));
+
+    constexpr int64_t kN = 1LL << 20;  // 1M floats
+    Tensor h_src({kN}, DType::F32, Device::CPU);
+    auto* h_src_ptr = static_cast<float*>(h_src.data_);
+    for (int64_t i = 0; i < kN; ++i) {
+        h_src_ptr[i] = static_cast<float>((i % 1024) - 512) * 0.03125f;
+    }
+
+    Tensor d({kN}, DType::F32, Device::CUDA, stream);
+    d.copy_from(h_src, stream);
+    stream.synchronize();
+
+    // If to_vector() returns before D2H copy completion, this can read stale/garbage.
+    const std::vector<float> v = d.to_vector<float>(stream);
+
+    ASSERT_EQ(v.size(), static_cast<size_t>(kN));
+    constexpr float kEps = 1e-6f;
+    for (int64_t i = 0; i < kN; ++i) {
+        EXPECT_NEAR(v[static_cast<size_t>(i)], h_src_ptr[i], kEps) << "idx=" << i;
+    }
+}
+
+TEST(TensorCorrectness, RejectsCpuZerosWithStreamArgument) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Stream stream(cudaStream_t(0));
+    EXPECT_THROW((void)Tensor::zeros({128}, DType::F32, Device::CPU, stream), std::invalid_argument);
+}
+
+TEST(TensorCorrectness, RejectsCpuToVectorWithStreamArgument) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Stream stream(cudaStream_t(0));
+    Tensor h({128}, DType::F32, Device::CPU);
+    EXPECT_THROW((void)h.to_vector<float>(stream), std::invalid_argument);
+}
+
+TEST(TensorCorrectness, RejectsCpuDestinationCopyFromWithStreamArgument) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Stream stream(cudaStream_t(0));
+    Tensor src({128}, DType::F32, Device::CPU);
+    Tensor dst({128}, DType::F32, Device::CPU);
+    EXPECT_THROW((void)dst.copy_from(src, stream), std::invalid_argument);
+}
+
 
 }  // namespace

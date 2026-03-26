@@ -28,9 +28,6 @@ struct LinearResults {
     LinearCtx ctx;
 };
 
-// Stream/handle contract for linear ops:
-// - `stream` must be non-null and must not be the default CUDA stream.
-// - Concurrent host launches sharing one CublasHandle are supported and internally synchronized.
 LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream* stream, CublasHandle& cublas_handle); //const
 LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_dX, bool needs_dW, bool needs_db, Stream* stream, CublasHandle& cublas_handle); //const
 

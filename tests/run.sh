@@ -4,12 +4,11 @@ set -euo pipefail
 usage() {
   echo "Usage:"
   echo "  tests/run.sh"
-  echo "  tests/run.sh [--label <smoke|concurrency|stress|all>] [--require-cuda-tests] <test-source-file> [-- <binary-args...>]"
-  echo "  tests/run.sh [--label <smoke|concurrency|stress|all>] [--require-cuda-tests] -- <binary-args...>"
+  echo "  tests/run.sh [--label <smoke|stress|all>] [--require-cuda-tests] <test-source-file> [-- <binary-args...>]"
+  echo "  tests/run.sh [--label <smoke|stress|all>] [--require-cuda-tests] -- <binary-args...>"
   echo "Examples:"
   echo "  tests/run.sh"
   echo "  tests/run.sh --label smoke"
-  echo "  tests/run.sh --label concurrency"
   echo "  tests/run.sh tests/test_tensor.cu"
   echo "  tests/run.sh tests/test_linear.cu -- --gtest_filter=LinearForward.Invariant*"
   echo "  FA_REQUIRE_CUDA_TESTS=1 tests/run.sh --label smoke"
@@ -59,9 +58,9 @@ done
 
 if [[ -n "$label" ]]; then
   case "$label" in
-    smoke|concurrency|stress|all) ;;
+    smoke|stress|all) ;;
     *)
-      echo "error: unsupported label '$label'. Expected smoke|concurrency|stress|all." >&2
+      echo "error: unsupported label '$label'. Expected smoke|stress|all." >&2
       exit 1
       ;;
   esac
@@ -118,9 +117,6 @@ if [[ -n "$label" && "$label" != "all" && -n "$target" ]]; then
     smoke)
       bin_args+=("--gtest_filter=LinearForward.Rejects*:LinearForward.SweepAllCases:LinearForward.Numeric*:LinearForward.Invariant*:TensorCorrectness.*")
       ;;
-    concurrency)
-      bin_args+=("--gtest_filter=LinearForward.MultiStreamConcurrencyIndependentWorkloads:LinearForward.ConcurrencyMatrix_*")
-      ;;
     stress)
       bin_args+=("--gtest_filter=LinearForward.Stress_*:LinearForward.SingleStreamOrderingReuseStress*")
       ;;
@@ -176,9 +172,6 @@ if [[ -z "$target" ]]; then
     case "$label" in
       smoke)
         ctest_cmd+=( -R "(Rejects|SweepAllCases|Numeric|Invariant|SingleStream|TensorCorrectness\\.)" )
-        ;;
-      concurrency)
-        ctest_cmd+=( -R "(Concurrency|ConcurrencyMatrix|CublasHandleMatrix)" )
         ;;
       stress)
         ctest_cmd+=( -R "(Stress_|ReuseStress)" )
