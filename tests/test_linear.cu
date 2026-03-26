@@ -99,6 +99,24 @@ float ForwardLossDotDY(const std::vector<float>& x,
     return Dot(y, dY_ref);
 }
 
+__global__ void affine_inplace_kernel(float* data, int n, float scale, float bias) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        data[idx] = data[idx] * scale + bias;
+    }
+}
+
+void ApplyAffineInplaceF32(Tensor& t, float scale, float bias, Stream& stream) {
+    if (t.dtype_ != DType::F32 || t.device_ != Device::CUDA) {
+        throw std::invalid_argument("ApplyAffineInplaceF32 expects CUDA float tensor.");
+    }
+    const int n = static_cast<int>(t.numel());
+    const int block = 256;
+    const int grid = (n + block - 1) / block;
+    affine_inplace_kernel<<<grid, block, 0, stream.s>>>(static_cast<float*>(t.data_), n, scale, bias);
+    CUDA_CHECK(cudaGetLastError());
+}
+
 TEST(LinearBackward, MatchesReferenceAllGradsOddN) {
     if (!fa_test::cuda_available()) {
         GTEST_SKIP() << "CUDA runtime unavailable";
@@ -201,6 +219,531 @@ TEST(LinearBackward, RejectsDYShapeMismatch) {
     Tensor dY_bad({6, 3}, DType::F32, Device::CUDA, stream);
     EXPECT_THROW((void)linear_backward(dY_bad, out.ctx, true, true, false, &stream, handle),
                  std::invalid_argument);
+}
+
+TEST(LinearForwardBackward, DemoForwardBackwardCtxStoresXWByPointer) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    constexpr int m = 30;
+    constexpr int n = 40;
+    constexpr int k = 20;
+    constexpr float abs_tol = 1e-5f;
+    constexpr float rel_tol = 1e-5f;
+    const uint32_t seed = fa_test::MixSeed(fa_test::kLinearSeedBase, m, n, k, 260);
+
+    fa_test::HostLinearInputs<float> inputs(m, n, k, true, -1.0f, 1.0f, seed);
+    ASSERT_TRUE(inputs.b_h.has_value());
+    const std::vector<float> dY_ref =
+        fa_test::SampleUniformVector(static_cast<size_t>(m) * n, -1.0f, 1.0f, seed + 101u);
+
+    Stream stream;
+    CublasHandle handle;
+
+    Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
+    Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
+    Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
+
+    LinearResults out = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    ASSERT_EQ(out.ctx.X, &x_d);
+    ASSERT_EQ(out.ctx.W, &w_d);
+    ASSERT_TRUE(out.ctx.has_bias);
+    ASSERT_EQ(out.ctx.m, m);
+    ASSERT_EQ(out.ctx.n, n);
+    ASSERT_EQ(out.ctx.k, k);
+
+    Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
+    Tensor dY_d = dY_h.clone(Device::CUDA, stream);
+
+    LinearGrads grads_before = linear_backward(dY_d, out.ctx, true, true, false, &stream, handle);
+    ASSERT_TRUE(grads_before.dX.has_value());
+    ASSERT_TRUE(grads_before.dW.has_value());
+
+    std::vector<float> dX_before, dW_before, db_expected_unused;
+    fa_test::reference_linear_backward(inputs.x_ref, inputs.w_ref, dY_ref, m, k, n,
+                                       dX_before, dW_before, db_expected_unused);
+    stream.synchronize();
+    ExpectVectorNear(grads_before.dX->clone(Device::CPU).to_vector<float>(), dX_before, abs_tol, rel_tol,
+                     ReproTag("ctx_demo_before_dx", seed, m, n, k));
+    ExpectVectorNear(grads_before.dW->clone(Device::CPU).to_vector<float>(), dW_before, abs_tol, rel_tol,
+                     ReproTag("ctx_demo_before_dw", seed, m, n, k));
+
+    std::vector<float> x2_ref(static_cast<size_t>(m) * k);
+    std::vector<float> w2_ref(static_cast<size_t>(n) * k);
+    for (size_t i = 0; i < x2_ref.size(); ++i) {
+        x2_ref[i] = inputs.x_ref[i] * 0.5f + 0.125f;
+    }
+    for (size_t i = 0; i < w2_ref.size(); ++i) {
+        w2_ref[i] = inputs.w_ref[i] * -0.75f + 0.25f;
+    }
+    Tensor x2_h = MakeCpuTensor2D(m, k, x2_ref);
+    Tensor w2_h = MakeCpuTensor2D(n, k, w2_ref);
+    x_d.copy_from(x2_h, stream);
+    w_d.copy_from(w2_h, stream);
+
+    LinearGrads grads_after = linear_backward(dY_d, out.ctx, true, true, false, &stream, handle);
+    ASSERT_TRUE(grads_after.dX.has_value());
+    ASSERT_TRUE(grads_after.dW.has_value());
+
+    std::vector<float> dX_after, dW_after;
+    fa_test::reference_linear_backward(x2_ref, w2_ref, dY_ref, m, k, n,
+                                       dX_after, dW_after, db_expected_unused);
+    stream.synchronize();
+    ExpectVectorNear(grads_after.dX->clone(Device::CPU).to_vector<float>(), dX_after, abs_tol, rel_tol,
+                     ReproTag("ctx_demo_after_dx", seed, m, n, k));
+    ExpectVectorNear(grads_after.dW->clone(Device::CPU).to_vector<float>(), dW_after, abs_tol, rel_tol,
+                     ReproTag("ctx_demo_after_dw", seed, m, n, k));
+}
+
+TEST(LinearForwardBackward, TwoStageReuseNoMidTransfer) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    constexpr int m = 7;
+    constexpr int n = 9;
+    constexpr int k = 5;
+    constexpr float abs_tol = 1e-4f;
+    constexpr float rel_tol = 1e-4f;
+    const uint32_t seed = fa_test::MixSeed(fa_test::kLinearSeedBase, m, n, k, 320);
+
+    fa_test::HostLinearInputs<float> inputs(m, n, k, true, -1.0f, 1.0f, seed);
+    ASSERT_TRUE(inputs.b_h.has_value());
+    const std::vector<float> dY1_ref =
+        fa_test::SampleUniformVector(static_cast<size_t>(m) * n, -1.0f, 1.0f, seed + 1u);
+    const std::vector<float> dY2_ref =
+        fa_test::SampleUniformVector(static_cast<size_t>(m) * n, -1.0f, 1.0f, seed + 2u);
+
+    Stream stream;
+    CublasHandle handle;
+
+    // H2D setup only.
+    Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
+    Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
+    Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
+    Tensor dY1_d = MakeCpuTensor2D(m, n, dY1_ref).clone(Device::CUDA, stream);
+    Tensor dY2_d = MakeCpuTensor2D(m, n, dY2_ref).clone(Device::CUDA, stream);
+
+    // Stage 1 entirely on device.
+    LinearResults out1 = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearGrads g1 = linear_backward(dY1_d, out1.ctx, true, true, true, &stream, handle);
+    ASSERT_TRUE(g1.dX.has_value());
+    ASSERT_TRUE(g1.dW.has_value());
+    ASSERT_TRUE(g1.db.has_value());
+
+    // Device-only mutation.
+    ApplyAffineInplaceF32(x_d, 0.5f, 0.125f, stream);
+    ApplyAffineInplaceF32(w_d, -0.75f, 0.25f, stream);
+    ApplyAffineInplaceF32(b_d, 0.9f, -0.05f, stream);
+
+    // Stage 2 entirely on device.
+    LinearResults out2 = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearGrads g2 = linear_backward(dY2_d, out2.ctx, true, true, true, &stream, handle);
+    ASSERT_TRUE(g2.dX.has_value());
+    ASSERT_TRUE(g2.dW.has_value());
+    ASSERT_TRUE(g2.db.has_value());
+
+    // Transfer only at the end.
+    stream.synchronize();
+    const std::vector<float> g1_dX = g1.dX->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> g1_dW = g1.dW->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> g1_db = g1.db->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> g2_dX = g2.dX->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> g2_dW = g2.dW->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> g2_db = g2.db->clone(Device::CPU).to_vector<float>();
+
+    std::vector<float> g1_dX_expected, g1_dW_expected, g1_db_expected;
+    fa_test::reference_linear_backward(inputs.x_ref, inputs.w_ref, dY1_ref, m, k, n,
+                                       g1_dX_expected, g1_dW_expected, g1_db_expected);
+
+    std::vector<float> x2_ref = inputs.x_ref;
+    std::vector<float> w2_ref = inputs.w_ref;
+    std::vector<float> b2_ref = inputs.b_ref;
+    for (float& v : x2_ref) v = v * 0.5f + 0.125f;
+    for (float& v : w2_ref) v = v * -0.75f + 0.25f;
+    for (float& v : b2_ref) v = v * 0.9f - 0.05f;
+
+    std::vector<float> g2_dX_expected, g2_dW_expected, g2_db_expected;
+    fa_test::reference_linear_backward(x2_ref, w2_ref, dY2_ref, m, k, n,
+                                       g2_dX_expected, g2_dW_expected, g2_db_expected);
+
+    ExpectVectorNear(g1_dX, g1_dX_expected, abs_tol, rel_tol, ReproTag("combined_2stage_s1_dx", seed, m, n, k));
+    ExpectVectorNear(g1_dW, g1_dW_expected, abs_tol, rel_tol, ReproTag("combined_2stage_s1_dw", seed, m, n, k));
+    ExpectVectorNear(g1_db, g1_db_expected, abs_tol, rel_tol, ReproTag("combined_2stage_s1_db", seed, m, n, k));
+    ExpectVectorNear(g2_dX, g2_dX_expected, abs_tol, rel_tol, ReproTag("combined_2stage_s2_dx", seed, m, n, k));
+    ExpectVectorNear(g2_dW, g2_dW_expected, abs_tol, rel_tol, ReproTag("combined_2stage_s2_dw", seed, m, n, k));
+    ExpectVectorNear(g2_db, g2_db_expected, abs_tol, rel_tol, ReproTag("combined_2stage_s2_db", seed, m, n, k));
+}
+
+TEST(LinearForwardBackward, CtxIsolationAcrossMultipleForwardsNoMidTransfer) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    constexpr int m1 = 5, n1 = 7, k1 = 3;
+    constexpr int m2 = 6, n2 = 4, k2 = 5;
+    constexpr float abs_tol = 1e-4f;
+    constexpr float rel_tol = 1e-4f;
+    const uint32_t seed1 = fa_test::MixSeed(fa_test::kLinearSeedBase, m1, n1, k1, 321);
+    const uint32_t seed2 = fa_test::MixSeed(fa_test::kLinearSeedBase, m2, n2, k2, 322);
+
+    fa_test::HostLinearInputs<float> a(m1, n1, k1, true, -1.0f, 1.0f, seed1);
+    fa_test::HostLinearInputs<float> b(m2, n2, k2, false, -1.0f, 1.0f, seed2);
+    ASSERT_TRUE(a.b_h.has_value());
+    const std::vector<float> dYa_ref =
+        fa_test::SampleUniformVector(static_cast<size_t>(m1) * n1, -1.0f, 1.0f, seed1 + 1u);
+    const std::vector<float> dYb_ref =
+        fa_test::SampleUniformVector(static_cast<size_t>(m2) * n2, -1.0f, 1.0f, seed2 + 1u);
+
+    Stream stream;
+    CublasHandle handle;
+
+    // H2D setup only.
+    Tensor xa_d = a.x_h.clone(Device::CUDA, stream);
+    Tensor wa_d = a.w_h.clone(Device::CUDA, stream);
+    Tensor ba_d = a.b_h->clone(Device::CUDA, stream);
+    Tensor xb_d = b.x_h.clone(Device::CUDA, stream);
+    Tensor wb_d = b.w_h.clone(Device::CUDA, stream);
+    Tensor dYa_d = MakeCpuTensor2D(m1, n1, dYa_ref).clone(Device::CUDA, stream);
+    Tensor dYb_d = MakeCpuTensor2D(m2, n2, dYb_ref).clone(Device::CUDA, stream);
+
+    LinearResults out_a = linear_forward(xa_d, wa_d, &ba_d, &stream, handle);
+    LinearResults out_b = linear_forward(xb_d, wb_d, nullptr, &stream, handle);
+
+    // Backward in reverse order to stress ctx isolation.
+    LinearGrads gb = linear_backward(dYb_d, out_b.ctx, true, true, true, &stream, handle);
+    LinearGrads ga = linear_backward(dYa_d, out_a.ctx, true, true, true, &stream, handle);
+    ASSERT_TRUE(gb.dX.has_value());
+    ASSERT_TRUE(gb.dW.has_value());
+    ASSERT_FALSE(gb.db.has_value());
+    ASSERT_TRUE(ga.dX.has_value());
+    ASSERT_TRUE(ga.dW.has_value());
+    ASSERT_TRUE(ga.db.has_value());
+
+    // Transfer only at the end.
+    stream.synchronize();
+    const std::vector<float> gb_dX = gb.dX->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> gb_dW = gb.dW->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> ga_dX = ga.dX->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> ga_dW = ga.dW->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> ga_db = ga.db->clone(Device::CPU).to_vector<float>();
+
+    std::vector<float> gb_dX_expected, gb_dW_expected, gb_db_expected_unused;
+    std::vector<float> ga_dX_expected, ga_dW_expected, ga_db_expected;
+    fa_test::reference_linear_backward(b.x_ref, b.w_ref, dYb_ref, m2, k2, n2,
+                                       gb_dX_expected, gb_dW_expected, gb_db_expected_unused);
+    fa_test::reference_linear_backward(a.x_ref, a.w_ref, dYa_ref, m1, k1, n1,
+                                       ga_dX_expected, ga_dW_expected, ga_db_expected);
+
+    ExpectVectorNear(gb_dX, gb_dX_expected, abs_tol, rel_tol, ReproTag("combined_iso_b_dx", seed2, m2, n2, k2));
+    ExpectVectorNear(gb_dW, gb_dW_expected, abs_tol, rel_tol, ReproTag("combined_iso_b_dw", seed2, m2, n2, k2));
+    ExpectVectorNear(ga_dX, ga_dX_expected, abs_tol, rel_tol, ReproTag("combined_iso_a_dx", seed1, m1, n1, k1));
+    ExpectVectorNear(ga_dW, ga_dW_expected, abs_tol, rel_tol, ReproTag("combined_iso_a_dw", seed1, m1, n1, k1));
+    ExpectVectorNear(ga_db, ga_db_expected, abs_tol, rel_tol, ReproTag("combined_iso_a_db", seed1, m1, n1, k1));
+}
+
+TEST(LinearForwardBackward, SweepAllCasesNoMidTransfer) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    const std::vector<fa_test::LinearForwardBackwardCase> cases = fa_test::BuildForwardBackwardCases();
+    std::vector<std::string> failures;
+    failures.reserve(64);
+
+    for (const fa_test::LinearForwardBackwardCase& c : cases) {
+        for (int iter = 0; iter < c.iters; ++iter) {
+            const uint32_t seed = fa_test::MixSeed(fa_test::kLinearSeedBase, c.m, c.n, c.k, 700 + iter);
+            fa_test::HostLinearInputs<float> inputs(c.m, c.n, c.k, c.with_bias, c.lo, c.hi, seed);
+            const std::vector<float> dY1_ref = fa_test::SampleUniformVector(
+                static_cast<size_t>(c.m) * c.n, c.lo, c.hi, seed + 1u);
+            const std::vector<float> dY2_ref = fa_test::SampleUniformVector(
+                static_cast<size_t>(c.m) * c.n, c.lo, c.hi, seed + 2u);
+
+            Stream stream;
+            CublasHandle handle;
+
+            // H2D setup only.
+            Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
+            Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
+            std::optional<Tensor> b_d;
+            const Tensor* b_d_ptr = nullptr;
+            if (c.with_bias) {
+                ASSERT_TRUE(inputs.b_h.has_value());
+                b_d.emplace(inputs.b_h->clone(Device::CUDA, stream));
+                b_d_ptr = &b_d.value();
+            }
+            Tensor dY1_d = MakeCpuTensor2D(c.m, c.n, dY1_ref).clone(Device::CUDA, stream);
+            Tensor dY2_d = MakeCpuTensor2D(c.m, c.n, dY2_ref).clone(Device::CUDA, stream);
+
+            // Stage 1 entirely on device.
+            LinearResults out1 = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
+            LinearGrads g1 = linear_backward(dY1_d, out1.ctx, true, true, c.with_bias, &stream, handle);
+            ASSERT_TRUE(g1.dX.has_value());
+            ASSERT_TRUE(g1.dW.has_value());
+            if (c.with_bias) {
+                ASSERT_TRUE(g1.db.has_value());
+            } else {
+                ASSERT_FALSE(g1.db.has_value());
+            }
+
+            // Device-only mutation.
+            ApplyAffineInplaceF32(x_d, 0.5f, 0.125f, stream);
+            ApplyAffineInplaceF32(w_d, -0.75f, 0.25f, stream);
+            if (c.with_bias) {
+                ApplyAffineInplaceF32(b_d.value(), 0.9f, -0.05f, stream);
+            }
+
+            // Stage 2 entirely on device.
+            LinearResults out2 = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
+            LinearGrads g2 = linear_backward(dY2_d, out2.ctx, true, true, c.with_bias, &stream, handle);
+            ASSERT_TRUE(g2.dX.has_value());
+            ASSERT_TRUE(g2.dW.has_value());
+            if (c.with_bias) {
+                ASSERT_TRUE(g2.db.has_value());
+            } else {
+                ASSERT_FALSE(g2.db.has_value());
+            }
+
+            // Transfer only at the end.
+            stream.synchronize();
+            const std::vector<float> g1_dX = g1.dX->clone(Device::CPU).to_vector<float>();
+            const std::vector<float> g1_dW = g1.dW->clone(Device::CPU).to_vector<float>();
+            const std::vector<float> g2_dX = g2.dX->clone(Device::CPU).to_vector<float>();
+            const std::vector<float> g2_dW = g2.dW->clone(Device::CPU).to_vector<float>();
+
+            std::vector<float> g1_db;
+            std::vector<float> g2_db;
+            if (c.with_bias) {
+                g1_db = g1.db->clone(Device::CPU).to_vector<float>();
+                g2_db = g2.db->clone(Device::CPU).to_vector<float>();
+            }
+
+            std::vector<float> g1_dX_expected, g1_dW_expected, g1_db_expected;
+            fa_test::reference_linear_backward(inputs.x_ref, inputs.w_ref, dY1_ref, c.m, c.k, c.n,
+                                               g1_dX_expected, g1_dW_expected, g1_db_expected);
+
+            std::vector<float> x2_ref = inputs.x_ref;
+            std::vector<float> w2_ref = inputs.w_ref;
+            for (float& v : x2_ref) v = v * 0.5f + 0.125f;
+            for (float& v : w2_ref) v = v * -0.75f + 0.25f;
+
+            std::vector<float> b2_ref;
+            if (c.with_bias) {
+                b2_ref = inputs.b_ref;
+                for (float& v : b2_ref) v = v * 0.9f - 0.05f;
+            }
+
+            std::vector<float> g2_dX_expected, g2_dW_expected, g2_db_expected;
+            fa_test::reference_linear_backward(x2_ref, w2_ref, dY2_ref, c.m, c.k, c.n,
+                                               g2_dX_expected, g2_dW_expected, g2_db_expected);
+
+            auto first_fail_idx = [&](const std::vector<float>& got, const std::vector<float>& expected) -> int {
+                if (got.size() != expected.size()) return -2;
+                for (size_t i = 0; i < got.size(); ++i) {
+                    const float tol = c.abs_tol + c.rel_tol * std::fabs(expected[i]);
+                    if (std::fabs(got[i] - expected[i]) > tol) {
+                        return static_cast<int>(i);
+                    }
+                }
+                return -1;
+            };
+
+            const int s1_dx_fail = first_fail_idx(g1_dX, g1_dX_expected);
+            const int s1_dw_fail = first_fail_idx(g1_dW, g1_dW_expected);
+            const int s2_dx_fail = first_fail_idx(g2_dX, g2_dX_expected);
+            const int s2_dw_fail = first_fail_idx(g2_dW, g2_dW_expected);
+            int s1_db_fail = -1;
+            int s2_db_fail = -1;
+            if (c.with_bias) {
+                s1_db_fail = first_fail_idx(g1_db, g1_db_expected);
+                s2_db_fail = first_fail_idx(g2_db, g2_db_expected);
+            }
+
+            const bool failed = (s1_dx_fail != -1) || (s1_dw_fail != -1) ||
+                                (s2_dx_fail != -1) || (s2_dw_fail != -1) ||
+                                (c.with_bias && ((s1_db_fail != -1) || (s2_db_fail != -1)));
+            if (failed) {
+                std::ostringstream one;
+                one << "case=" << c.name
+                    << " dist=" << fa_test::DistName(c.dist)
+                    << " bias=" << (c.with_bias ? "true" : "false")
+                    << " iter=" << iter
+                    << " seed=" << seed
+                    << " m=" << c.m << " n=" << c.n << " k=" << c.k
+                    << " s1_dx_fail_idx=" << s1_dx_fail
+                    << " s1_dw_fail_idx=" << s1_dw_fail
+                    << " s2_dx_fail_idx=" << s2_dx_fail
+                    << " s2_dw_fail_idx=" << s2_dw_fail;
+                if (c.with_bias) {
+                    one << " s1_db_fail_idx=" << s1_db_fail
+                        << " s2_db_fail_idx=" << s2_db_fail;
+                }
+                failures.push_back(one.str());
+            }
+        }
+    }
+
+    if (!failures.empty()) {
+        std::ostringstream all;
+        all << "LinearForwardBackward sweep failed in " << failures.size() << " case(s):\n";
+        for (const std::string& f : failures) {
+            all << "  " << f << "\n";
+        }
+        ADD_FAILURE() << all.str();
+    }
+}
+
+TEST(LinearForwardBackward, MegaCoverageMatrixNoMidTransfer) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    constexpr int m = 8;
+    constexpr int n = 6;
+    constexpr int k = 5;
+    constexpr float abs_tol = 1e-4f;
+    constexpr float rel_tol = 1e-4f;
+    constexpr float zero_abs_tol = 1e-7f;
+    const uint32_t seed = fa_test::MixSeed(fa_test::kLinearSeedBase, m, n, k, 390);
+
+    fa_test::HostLinearInputs<float> inputs(m, n, k, true, -1.0f, 1.0f, seed);
+    ASSERT_TRUE(inputs.b_h.has_value());
+    const std::vector<float> dY_rand_ref =
+        fa_test::SampleUniformVector(static_cast<size_t>(m) * n, -1.0f, 1.0f, seed + 1u);
+    const std::vector<float> dY_zero_ref(static_cast<size_t>(m) * n, 0.0f);
+
+    Stream stream;
+    CublasHandle handle;
+
+    // H2D setup only.
+    Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
+    Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
+    Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
+    Tensor dY_rand_d = MakeCpuTensor2D(m, n, dY_rand_ref).clone(Device::CUDA, stream);
+    Tensor dY_zero_d = MakeCpuTensor2D(m, n, dY_zero_ref).clone(Device::CUDA, stream);
+
+    // Forward with and without bias from the same X/W.
+    LinearResults out_bias = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearResults out_no_bias = linear_forward(x_d, w_d, nullptr, &stream, handle);
+
+    // Backward matrix over flag combinations.
+    LinearGrads g_all = linear_backward(dY_rand_d, out_bias.ctx, true, true, true, &stream, handle);
+    LinearGrads g_all_rep = linear_backward(dY_rand_d, out_bias.ctx, true, true, true, &stream, handle);
+    LinearGrads g_dx_only = linear_backward(dY_rand_d, out_bias.ctx, true, false, false, &stream, handle);
+    LinearGrads g_dw_only = linear_backward(dY_rand_d, out_bias.ctx, false, true, false, &stream, handle);
+    LinearGrads g_db_only = linear_backward(dY_rand_d, out_bias.ctx, false, false, true, &stream, handle);
+    LinearGrads g_none = linear_backward(dY_rand_d, out_bias.ctx, false, false, false, &stream, handle);
+    LinearGrads g_no_bias_needs_db = linear_backward(dY_rand_d, out_no_bias.ctx, false, false, true, &stream, handle);
+    LinearGrads g_no_bias_all = linear_backward(dY_rand_d, out_no_bias.ctx, true, true, true, &stream, handle);
+    LinearGrads g_zero = linear_backward(dY_zero_d, out_bias.ctx, true, true, true, &stream, handle);
+
+    // Flag/presence checks.
+    ASSERT_TRUE(g_all.dX.has_value());
+    ASSERT_TRUE(g_all.dW.has_value());
+    ASSERT_TRUE(g_all.db.has_value());
+    ASSERT_TRUE(g_all_rep.dX.has_value());
+    ASSERT_TRUE(g_all_rep.dW.has_value());
+    ASSERT_TRUE(g_all_rep.db.has_value());
+
+    ASSERT_TRUE(g_dx_only.has_dX);
+    ASSERT_FALSE(g_dx_only.has_dW);
+    ASSERT_FALSE(g_dx_only.has_db);
+    ASSERT_TRUE(g_dx_only.dX.has_value());
+    ASSERT_FALSE(g_dx_only.dW.has_value());
+    ASSERT_FALSE(g_dx_only.db.has_value());
+
+    ASSERT_FALSE(g_dw_only.has_dX);
+    ASSERT_TRUE(g_dw_only.has_dW);
+    ASSERT_FALSE(g_dw_only.has_db);
+    ASSERT_FALSE(g_dw_only.dX.has_value());
+    ASSERT_TRUE(g_dw_only.dW.has_value());
+    ASSERT_FALSE(g_dw_only.db.has_value());
+
+    ASSERT_FALSE(g_db_only.has_dX);
+    ASSERT_FALSE(g_db_only.has_dW);
+    ASSERT_TRUE(g_db_only.has_db);
+    ASSERT_FALSE(g_db_only.dX.has_value());
+    ASSERT_FALSE(g_db_only.dW.has_value());
+    ASSERT_TRUE(g_db_only.db.has_value());
+
+    ASSERT_FALSE(g_none.has_dX);
+    ASSERT_FALSE(g_none.has_dW);
+    ASSERT_FALSE(g_none.has_db);
+    ASSERT_FALSE(g_none.dX.has_value());
+    ASSERT_FALSE(g_none.dW.has_value());
+    ASSERT_FALSE(g_none.db.has_value());
+
+    ASSERT_FALSE(g_no_bias_needs_db.has_db);
+    ASSERT_FALSE(g_no_bias_needs_db.db.has_value());
+    ASSERT_TRUE(g_no_bias_all.has_dX);
+    ASSERT_TRUE(g_no_bias_all.has_dW);
+    ASSERT_FALSE(g_no_bias_all.has_db);
+    ASSERT_TRUE(g_no_bias_all.dX.has_value());
+    ASSERT_TRUE(g_no_bias_all.dW.has_value());
+    ASSERT_FALSE(g_no_bias_all.db.has_value());
+
+    ASSERT_TRUE(g_zero.dX.has_value());
+    ASSERT_TRUE(g_zero.dW.has_value());
+    ASSERT_TRUE(g_zero.db.has_value());
+
+    // Reference expectations on host.
+    std::vector<float> dX_expected, dW_expected, db_expected;
+    fa_test::reference_linear_backward(inputs.x_ref, inputs.w_ref, dY_rand_ref, m, k, n,
+                                       dX_expected, dW_expected, db_expected);
+    std::vector<float> dX_zero_expected(static_cast<size_t>(m) * k, 0.0f);
+    std::vector<float> dW_zero_expected(static_cast<size_t>(n) * k, 0.0f);
+    std::vector<float> db_zero_expected(static_cast<size_t>(n), 0.0f);
+
+    // Transfer only at the end.
+    stream.synchronize();
+
+    const std::vector<float> all_dX = g_all.dX->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> all_dW = g_all.dW->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> all_db = g_all.db->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> rep_dX = g_all_rep.dX->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> rep_dW = g_all_rep.dW->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> rep_db = g_all_rep.db->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> dx_only = g_dx_only.dX->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> dw_only = g_dw_only.dW->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> db_only = g_db_only.db->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> nb_dX = g_no_bias_all.dX->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> nb_dW = g_no_bias_all.dW->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> z_dX = g_zero.dX->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> z_dW = g_zero.dW->clone(Device::CPU).to_vector<float>();
+    const std::vector<float> z_db = g_zero.db->clone(Device::CPU).to_vector<float>();
+
+    // Value checks for requested grads.
+    ExpectVectorNear(all_dX, dX_expected, abs_tol, rel_tol, ReproTag("mega_all_dx", seed, m, n, k));
+    ExpectVectorNear(all_dW, dW_expected, abs_tol, rel_tol, ReproTag("mega_all_dw", seed, m, n, k));
+    ExpectVectorNear(all_db, db_expected, abs_tol, rel_tol, ReproTag("mega_all_db", seed, m, n, k));
+    ExpectVectorNear(dx_only, dX_expected, abs_tol, rel_tol, ReproTag("mega_dx_only", seed, m, n, k));
+    ExpectVectorNear(dw_only, dW_expected, abs_tol, rel_tol, ReproTag("mega_dw_only", seed, m, n, k));
+    ExpectVectorNear(db_only, db_expected, abs_tol, rel_tol, ReproTag("mega_db_only", seed, m, n, k));
+
+    // Determinism for repeated backward from same ctx and dY.
+    ASSERT_EQ(all_dX.size(), rep_dX.size());
+    ASSERT_EQ(all_dW.size(), rep_dW.size());
+    ASSERT_EQ(all_db.size(), rep_db.size());
+    for (size_t i = 0; i < all_dX.size(); ++i) {
+        EXPECT_FLOAT_EQ(all_dX[i], rep_dX[i]) << ReproTag("mega_det_dx", seed, m, n, k) << " idx=" << i;
+    }
+    for (size_t i = 0; i < all_dW.size(); ++i) {
+        EXPECT_FLOAT_EQ(all_dW[i], rep_dW[i]) << ReproTag("mega_det_dw", seed, m, n, k) << " idx=" << i;
+    }
+    for (size_t i = 0; i < all_db.size(); ++i) {
+        EXPECT_FLOAT_EQ(all_db[i], rep_db[i]) << ReproTag("mega_det_db", seed, m, n, k) << " idx=" << i;
+    }
+
+    // Bias-independence: dX and dW should match with/without bias.
+    ExpectVectorNear(nb_dX, all_dX, abs_tol, rel_tol, ReproTag("mega_bias_ind_dx", seed, m, n, k));
+    ExpectVectorNear(nb_dW, all_dW, abs_tol, rel_tol, ReproTag("mega_bias_ind_dw", seed, m, n, k));
+
+    // Zero dY should produce zeros.
+    ExpectVectorNear(z_dX, dX_zero_expected, zero_abs_tol, 0.0f, ReproTag("mega_zero_dx", seed, m, n, k));
+    ExpectVectorNear(z_dW, dW_zero_expected, zero_abs_tol, 0.0f, ReproTag("mega_zero_dw", seed, m, n, k));
+    ExpectVectorNear(z_db, db_zero_expected, zero_abs_tol, 0.0f, ReproTag("mega_zero_db", seed, m, n, k));
 }
 
 TEST(LinearBackward, RejectsNullStream) {
@@ -705,7 +1248,7 @@ TEST(LinearBackward, SingleStreamOrderingReuseStressFixedShape) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    const int launches = fa_test::LongStressEnabled() ? 900 : 350;
+    const int launches = fa_test::LongStressEnabled() ? 1400 : 500;
     constexpr int m = 96;
     constexpr int n = 144;
     constexpr int k = 80;
@@ -787,7 +1330,7 @@ TEST(LinearBackward, SingleStreamOrderingReuseStressShapeCycleABC) {
         {128, 96, 64, -10.0f, 10.0f, 4e-3f, 4e-4f, true},
     };
 
-    const int launches = fa_test::LongStressEnabled() ? 600 : 240;
+    const int launches = fa_test::LongStressEnabled() ? 900 : 360;
     Stream stream;
     CublasHandle handle;
     std::vector<fa_test::QueuedLinearBackwardJob> jobs;
@@ -1328,7 +1871,7 @@ TEST(LinearForward, SingleStreamOrderingReuseStressFixedShape) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    constexpr int launches = 1000;
+    constexpr int launches = 1400;
     constexpr int m = 128;
     constexpr int n = 256;
     constexpr int k = 512;
@@ -1392,7 +1935,7 @@ TEST(LinearForward, SingleStreamOrderingReuseStressShapeCycleABC) {
         {128, 72, 96, -100.0f, 100.0f, 1.5e-1f, 1e-3f, true},
     };
 
-    constexpr int launches = 600;
+    constexpr int launches = 900;
     Stream stream;
     CublasHandle handle;
     std::vector<fa_test::QueuedLinearJob> jobs;

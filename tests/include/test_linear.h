@@ -80,6 +80,17 @@ struct LinearBackwardCase {
     const char* name;
 };
 
+struct LinearForwardBackwardCase {
+    int m, n, k;
+    bool with_bias;
+    Dist dist;
+    float lo, hi;
+    float abs_tol;
+    float rel_tol;
+    int iters;
+    const char* name;
+};
+
 inline const char* DistName(Dist d) {
     switch (d) {
         case Dist::Uniform: return "uniform";
@@ -95,8 +106,11 @@ inline std::vector<LinearCase> BuildCases() {
         {1, 7, 3, "tiny_173"},
         {5, 1, 9, "tiny_519"},
         {37, 53, 29, "prime_375329"},
+        {64, 96, 80, "mid_649680"},
+        {128, 256, 192, "big_128256192"},
         {200, 300, 400, "med_200300400"},
         {512, 768, 1024, "large_5127681024"},
+        {768, 1024, 512, "xlarge_7681024512"},
     };
 
     std::vector<LinearCase> out;
@@ -106,7 +120,13 @@ inline std::vector<LinearCase> BuildCases() {
         const int k = std::get<2>(s);
         const char* name = std::get<3>(s);
 
-        const int iters = (m * n * k < 1000000) ? 10 : 3;
+        const long long volume = static_cast<long long>(m) * n * k;
+        int iters = 3;
+        if (volume < 1000000LL) {
+            iters = 12;
+        } else if (volume < 100000000LL) {
+            iters = 5;
+        }
         for (bool with_bias : {false, true}) {
             out.push_back({m, n, k, with_bias, Dist::Uniform, -1.0f, 1.0f, 1e-4f, 1e-4f, iters, name});
             out.push_back({m, n, k, with_bias, Dist::NearZero, -1e-6f, 1e-6f, 1e-7f, 1e-4f, iters, name});
@@ -122,8 +142,11 @@ inline std::vector<LinearBackwardCase> BuildBackwardCases() {
         {1, 7, 3, "tiny_173"},
         {5, 1, 9, "tiny_519"},
         {37, 53, 29, "prime_375329"},
+        {64, 96, 80, "mid_649680"},
+        {128, 256, 192, "big_128256192"},
         {200, 300, 400, "med_200300400"},
         {512, 768, 1024, "large_5127681024"},
+        {768, 1024, 512, "xlarge_7681024512"},
     };
 
     std::vector<LinearBackwardCase> out;
@@ -132,12 +155,51 @@ inline std::vector<LinearBackwardCase> BuildBackwardCases() {
         const int n = std::get<1>(s);
         const int k = std::get<2>(s);
         const char* name = std::get<3>(s);
-        const int iters = (m * n * k < 1000000) ? 10 : 3;
+        const long long volume = static_cast<long long>(m) * n * k;
+        int iters = 3;
+        if (volume < 1000000LL) {
+            iters = 12;
+        } else if (volume < 100000000LL) {
+            iters = 5;
+        }
 
         for (bool with_bias : {false, true}) {
             out.push_back({m, n, k, with_bias, Dist::Uniform, -1.0f, 1.0f, 1e-4f, 1e-4f, iters, name});
             out.push_back({m, n, k, with_bias, Dist::NearZero, -1e-6f, 1e-6f, 1e-7f, 1e-4f, iters, name});
             out.push_back({m, n, k, with_bias, Dist::MixedLarge, -100.0f, 100.0f, 1.5e-1f, 1e-3f, iters, name});
+        }
+    }
+    return out;
+}
+
+inline std::vector<LinearForwardBackwardCase> BuildForwardBackwardCases() {
+    const std::vector<std::tuple<int, int, int, const char*>> shapes = {
+        {3, 4, 2, "tiny_342"},
+        {13, 37, 19, "odd_133719"},
+        {64, 96, 80, "mid_649680"},
+        {128, 256, 192, "big_128256192"},
+        {200, 300, 400, "med_200300400"},
+        {512, 768, 1024, "large_5127681024"},
+    };
+
+    std::vector<LinearForwardBackwardCase> out;
+    for (const auto& s : shapes) {
+        const int m = std::get<0>(s);
+        const int n = std::get<1>(s);
+        const int k = std::get<2>(s);
+        const char* name = std::get<3>(s);
+        const long long volume = static_cast<long long>(m) * n * k;
+        int iters = 2;
+        if (volume < 1000000LL) {
+            iters = 6;
+        } else if (volume < 100000000LL) {
+            iters = 3;
+        }
+
+        for (bool with_bias : {false, true}) {
+            out.push_back({m, n, k, with_bias, Dist::Uniform, -1.0f, 1.0f, 1e-4f, 1e-4f, iters, name});
+            out.push_back({m, n, k, with_bias, Dist::NearZero, -1e-6f, 1e-6f, 1e-7f, 1e-4f, iters, name});
+            out.push_back({m, n, k, with_bias, Dist::MixedLarge, -100.0f, 100.0f, 2e-1f, 2e-3f, iters, name});
         }
     }
     return out;

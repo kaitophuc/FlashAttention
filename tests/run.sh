@@ -115,7 +115,7 @@ if [[ -n "$label" && "$label" != "all" && -n "$target" ]]; then
 
     case "$label" in
       smoke)
-      bin_args+=("--gtest_filter=LinearForward.Rejects*:LinearForward.SweepAllCases:LinearForward.Numeric*:LinearForward.Invariant*:LinearBackward.MatchesReference*:LinearBackward.SweepAllCases:LinearBackward.NeedsDb*:LinearBackward.Rejects*:LinearBackward.FiniteDifference*:LinearBackward.NeedsGradFlags*:TensorCorrectness.*")
+      bin_args+=("--gtest_filter=LinearForward.Rejects*:LinearForward.SweepAllCases:LinearForward.Numeric*:LinearForward.Invariant*:LinearBackward.MatchesReference*:LinearBackward.SweepAllCases:LinearBackward.NeedsDb*:LinearBackward.Rejects*:LinearBackward.FiniteDifference*:LinearBackward.NeedsGradFlags*:LinearForwardBackward.*:TensorCorrectness.*")
       ;;
       stress)
       bin_args+=("--gtest_filter=LinearForward.SingleStreamOrderingReuseStress*:LinearBackward.SingleStreamOrderingReuseStress*")
@@ -153,9 +153,10 @@ check_required_cuda_execution() {
   fi
 }
 
-# Allow overriding CUDA arch list, but default to native to avoid stale or mismatched
-# cache values across machines/driver updates.
-: "${FA_CUDA_ARCHITECTURES:=native}"
+# Allow overriding CUDA arch list.
+# Default to Blackwell consumer SM 12.0 (e.g., GeForce RTX 5070 Ti) to avoid
+# 'native' autodetect failures and unsupported PTX JIT paths.
+: "${FA_CUDA_ARCHITECTURES:=120}"
 cmake -S . -B build -DCMAKE_CUDA_ARCHITECTURES="${FA_CUDA_ARCHITECTURES}"
 if [[ -z "$target" ]]; then
   if [[ ${#bin_args[@]} -gt 0 ]]; then
