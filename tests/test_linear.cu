@@ -210,10 +210,15 @@ TEST(LinearForward, RejectsNonDefaultStream) {
     Tensor x({20, 30}, DType::F32, Device::CUDA, stream);
     Tensor w({40, 30}, DType::F32, Device::CUDA, stream);
 
-    Stream fake_non_default;
-    fake_non_default.s = reinterpret_cast<cudaStream_t>(static_cast<uintptr_t>(1));
-    fake_non_default.owns_ = false;
-    EXPECT_THROW((void)linear_forward(x, w, nullptr, &fake_non_default, handle), std::invalid_argument);
+    cudaStream_t raw_non_default = nullptr;
+    CUDA_CHECK(cudaStreamCreateWithFlags(&raw_non_default, cudaStreamNonBlocking));
+
+    Stream non_default_stream;
+    non_default_stream.s = raw_non_default;
+    non_default_stream.owns_ = false;
+    EXPECT_THROW((void)linear_forward(x, w, nullptr, &non_default_stream, handle), std::invalid_argument);
+
+    CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
 
 TEST(LinearForward, AcceptsDefaultStream) {

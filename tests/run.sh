@@ -118,7 +118,7 @@ if [[ -n "$label" && "$label" != "all" && -n "$target" ]]; then
       bin_args+=("--gtest_filter=LinearForward.Rejects*:LinearForward.SweepAllCases:LinearForward.Numeric*:LinearForward.Invariant*:TensorCorrectness.*")
       ;;
     stress)
-      bin_args+=("--gtest_filter=LinearForward.Stress_*:LinearForward.SingleStreamOrderingReuseStress*")
+      bin_args+=("--gtest_filter=LinearForward.SingleStreamOrderingReuseStress*")
       ;;
   esac
 fi
@@ -174,7 +174,7 @@ if [[ -z "$target" ]]; then
         ctest_cmd+=( -R "(Rejects|SweepAllCases|Numeric|Invariant|SingleStream|TensorCorrectness\\.)" )
         ;;
       stress)
-        ctest_cmd+=( -R "(Stress_|ReuseStress)" )
+        ctest_cmd+=( -R "(ReuseStress)" )
         ;;
     esac
   fi

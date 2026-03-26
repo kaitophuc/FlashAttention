@@ -1,8 +1,10 @@
 #include "cu_stream.h"
 #include "tensor.h"
 #include <benchmark/benchmark.h>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 namespace {
 bool cuda_available() {
     int device_count = 0;
@@ -10,6 +12,17 @@ bool cuda_available() {
     return cuda_ok == cudaSuccess && device_count > 0;
 }
 double measure_copy_from_seconds(Tensor& dst, const Tensor& src, Stream& stream) {
+    if (dst.device_ == Device::CPU) {
+        const auto start = std::chrono::steady_clock::now();
+        if (src.device_ == Device::CPU) {
+            std::memcpy(dst.data_, src.data_, dst.nbytes_);
+        } else {
+            CUDA_CHECK(cudaMemcpy(dst.data_, src.data_, dst.nbytes_, cudaMemcpyDeviceToHost));
+        }
+        const auto end = std::chrono::steady_clock::now();
+        return std::chrono::duration<double>(end - start).count();
+    }
+
     Event start;
     Event stop;
     record(start, stream);
@@ -46,8 +59,16 @@ void run_copy_benchmark(benchmark::State& state, cudaMemcpyKind kind) {
         dst = &d_dst;
     }
     // Warm-up before timed iterations.
-    dst->copy_from(*src, stream);
-    stream.synchronize();
+    if (dst->device_ == Device::CPU) {
+        if (src->device_ == Device::CPU) {
+            std::memcpy(dst->data_, src->data_, dst->nbytes_);
+        } else {
+            CUDA_CHECK(cudaMemcpy(dst->data_, src->data_, dst->nbytes_, cudaMemcpyDeviceToHost));
+        }
+    } else {
+        dst->copy_from(*src, stream);
+        stream.synchronize();
+    }
     double total_seconds = 0.0;
     for (auto _ : state) {
         (void)_;
