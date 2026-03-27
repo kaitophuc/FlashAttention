@@ -116,6 +116,9 @@ ReluResults relu_forward(const Tensor& X, Stream* stream) {
     if (X.dtype_ != DType::F32) {
         throw std::invalid_argument("relu_forward only supports float32 tensors.");
     }
+    if (X.device_ != Device::CUDA) {
+        throw std::invalid_argument("relu_forward only supports CUDA tensors.");
+    }
     if (X.shape_.size() != 2) {
         throw std::invalid_argument("relu_forward only supports 2D tensors.");
     }
@@ -159,8 +162,29 @@ ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream* stream) {
     if (stream->s != cudaStream_t(0)) {
         throw std::invalid_argument("relu_backward currently only supports the default stream.");
     }
+    if (ctx.X == nullptr) {
+        throw std::invalid_argument("relu_backward requires ctx.X to be non-null.");
+    }
+    if (ctx.X->shape_.size() != 2) {
+        throw std::invalid_argument("relu_backward requires ctx.X to be a 2D tensor.");
+    }
+    if (dY.shape_.size() != 2) {
+        throw std::invalid_argument("relu_backward only supports 2D tensors.");
+    }
     if (dY.dtype_ != DType::F32) {
         throw std::invalid_argument("relu_backward only supports float32 tensors.");
+    }
+    if (ctx.X->dtype_ != DType::F32) {
+        throw std::invalid_argument("relu_backward requires ctx.X to be float32.");
+    }
+    if (dY.dtype_ != ctx.X->dtype_) {
+        throw std::invalid_argument("relu_backward requires dY and ctx.X to have the same dtype.");
+    }
+    if (dY.device_ != Device::CUDA || ctx.X->device_ != Device::CUDA) {
+        throw std::invalid_argument("relu_backward only supports CUDA tensors.");
+    }
+    if (dY.device_ != ctx.X->device_) {
+        throw std::invalid_argument("relu_backward requires dY and ctx.X to be on the same device.");
     }
     if (dY.shape_ != ctx.X->shape_) {
         throw std::invalid_argument("relu_backward requires dY to have the same shape as the original input X.");
