@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 
-__global__
+/*__global__
 void add_bias(float* __restrict__ Y, const float* __restrict__ b, int m, int n) {
     const int total_elements = m * n;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -11,7 +11,7 @@ void add_bias(float* __restrict__ Y, const float* __restrict__ b, int m, int n) 
         int col = idx % n;
         Y[idx] += b[col];
     }
-}
+}*/
 
 template <int BLOCK_X, int BLOCK_Y, int ROWS_PER_THREAD>
 __global__ void compute_db_kernel(const float* __restrict__ dY,
@@ -50,7 +50,8 @@ __global__ void compute_db_kernel(const float* __restrict__ dY,
     }
 }
 
-
+// Using cublasLt for better performance and to leverage epilogue fusion for bias addition when available.
+/*
 LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream* stream, CublasHandle& handle) {
     // Check input shapes and dtypes.
     // At this phase, assume all tensors are in Float32 for simplicity. In a full implementation, we would handle different dtypes and possibly mixed precision.
@@ -127,6 +128,135 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
 
         add_bias<<<grid, block, 0, stream->s>>>(static_cast<float*>(Y.data_), static_cast<const float*>(b->data_), m, n);
     }
+    return LinearResults{std::move(Y), LinearCtx{&X, &W, b != nullptr, X.shape_[0], W.shape_[0], X.shape_[1]}};
+}
+*/
+
+
+LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream* stream, CublasHandle& handle) {
+    // Check input shapes and dtypes.
+    // At this phase, assume all tensors are in Float32 for simplicity. In a full implementation, we would handle different dtypes and possibly mixed precision.
+    // currently disable CPU support, so we can assume all tensors are on CUDA device.
+    if (stream == nullptr) {
+        throw std::invalid_argument("stream must not be null.");
+    }
+    if (stream->s != cudaStream_t(0)) {
+        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+    }
+    if (X.dtype_ != DType::F32 || W.dtype_ != DType::F32) {
+        throw std::invalid_argument("Currently only Float32 dtype is supported for X and W.");
+    }
+    if (X.shape_.size() != 2 || W.shape_.size() != 2) {
+        throw std::invalid_argument("X and W must be 2D tensors.");
+    }
+    if (X.dtype_ != W.dtype_) {
+        throw std::invalid_argument("X and W must have the same dtype.");
+    }
+    if (b != nullptr) {
+        if (b->shape_.size() != 1 || b->shape_[0] != W.shape_[0]) {
+            throw std::invalid_argument("Bias b must be a 1D tensor with shape matching output features.");
+        }
+        if (b->dtype_ != X.dtype_) {
+            throw std::invalid_argument("Bias b must have the same dtype as X and W.");
+        }
+    }
+    if (X.device_ != W.device_) {
+        throw std::invalid_argument("X and W must be on the same device.");
+    }
+    if (b != nullptr && b->device_ != X.device_) {
+        throw std::invalid_argument("Bias b must be on the same device as X and W.");
+    }
+    if (X.shape_[1] != W.shape_[1]) {
+        throw std::invalid_argument("Inner dimensions of X and W must match.");
+    }
+    if (X.device_ != Device::CUDA || W.device_ != Device::CUDA) {
+        throw std::invalid_argument("Currently only CUDA device is supported.");
+    }
+
+    // Create output tensor Y.
+    const int64_t m = X.shape_[0];
+    const int64_t n = W.shape_[0];
+    const int64_t k = X.shape_[1];
+    Tensor Y = Tensor::empty({m, n}, X.dtype_, X.device_, *stream);
+
+    cublasLtMatmulDesc_t operation_desc;
+    CUBLAS_CHECK(cublasLtMatmulDescCreate(&operation_desc, CUBLAS_COMPUTE_32F, CUDA_R_32F));
+    
+    // Perform matrix multiplication Y = X * W^T.
+    // Map row-major tensors into column-major descriptors:
+    // Y_col(n x m) = W_col(k x n)^T * X_col(k x m)
+    cublasOperation_t opA = CUBLAS_OP_T;
+    cublasOperation_t opB = CUBLAS_OP_N;
+    CUBLAS_CHECK(cublasLtMatmulDescSetAttribute(operation_desc, CUBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA)));
+    CUBLAS_CHECK(cublasLtMatmulDescSetAttribute(operation_desc, CUBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB)));
+
+    if (b != nullptr) {
+        // If bias is present, we can fuse the bias addition into the matmul using cublasLt with an epilogue.
+        cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
+        CUBLAS_CHECK(cublasLtMatmulDescSetAttribute(operation_desc, CUBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
+        void* bias_ptr = b->data_;
+        CUBLAS_CHECK(cublasLtMatmulDescSetAttribute(operation_desc, CUBLASLT_MATMUL_DESC_BIAS_POINTER, &bias_ptr, sizeof(bias_ptr)));
+    }
+
+    cublasLtMatrixLayout_t A_desc, B_desc, C_desc, D_desc;
+    CUBLAS_CHECK(cublasLtMatrixLayoutCreate(&A_desc, CUDA_R_32F, k, n, k)); // W as col-major [k, n]
+    CUBLAS_CHECK(cublasLtMatrixLayoutCreate(&B_desc, CUDA_R_32F, k, m, k)); // X as col-major [k, m]
+    CUBLAS_CHECK(cublasLtMatrixLayoutCreate(&C_desc, CUDA_R_32F, n, m, n)); // Y as col-major [n, m]
+    CUBLAS_CHECK(cublasLtMatrixLayoutCreate(&D_desc, CUDA_R_32F, n, m, n)); // Y as col-major [n, m]
+
+    const size_t workspace_size = 1 << 22; // 4 MiB workspace for cublasLt (tuning may be needed for larger matrices)
+    void* workspace = allocate_device(workspace_size, *stream);
+
+    cublasLtMatmulPreference_t pref;
+    CUBLAS_CHECK(cublasLtMatmulPreferenceCreate(&pref));
+    CUBLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(pref, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace_size, sizeof(workspace_size)));
+
+    cublasLtMatmulHeuristicResult_t heuristic_result{};
+    int heuristic_count = 0;
+    CUBLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(handle.get_lt(),
+        operation_desc,
+        A_desc,
+        B_desc,
+        C_desc,
+        D_desc,
+        pref,
+        1,
+        &heuristic_result,
+        &heuristic_count));
+
+    if (heuristic_count == 0) {
+        deallocate_device(workspace, *stream);
+        CUBLAS_CHECK(cublasLtMatmulPreferenceDestroy(pref));
+        CUBLAS_CHECK(cublasLtMatmulDescDestroy(operation_desc));
+        CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(A_desc));
+        CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(B_desc));
+        CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(C_desc));
+        CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(D_desc));
+        throw std::runtime_error("No suitable cublasLt matmul algorithm found.");
+    }
+
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    CUBLAS_CHECK(cublasLtMatmul(handle.get_lt(),
+        operation_desc,
+        &alpha,
+        W.data_, A_desc,
+        X.data_, B_desc,
+        &beta,
+        Y.data_, C_desc,
+        Y.data_, D_desc,
+        &heuristic_result.algo,
+        workspace, workspace_size,
+        stream->s));
+
+    deallocate_device(workspace, *stream);
+    CUBLAS_CHECK(cublasLtMatmulPreferenceDestroy(pref));
+    CUBLAS_CHECK(cublasLtMatmulDescDestroy(operation_desc));
+    CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(A_desc));
+    CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(B_desc));
+    CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(C_desc));
+    CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(D_desc));
+
     return LinearResults{std::move(Y), LinearCtx{&X, &W, b != nullptr, X.shape_[0], W.shape_[0], X.shape_[1]}};
 }
 

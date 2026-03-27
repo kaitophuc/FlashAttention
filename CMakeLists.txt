@@ -149,7 +149,7 @@ endforeach()
 
 if(FA_CORE_SOURCES)
   add_library(flashattention_core STATIC ${FA_CORE_SOURCES})
-  target_link_libraries(flashattention_core PUBLIC flashattention_common CUDA::cudart CUDA::cublas)
+  target_link_libraries(flashattention_core PUBLIC flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt)
 endif()
 
 # Auto-discover tests and create one executable per test file.
@@ -188,7 +188,7 @@ foreach(_src_main IN LISTS FA_SRC_MAIN_SOURCES)
   if(TARGET flashattention_core)
     target_link_libraries(${_src_target} PRIVATE flashattention_core)
   endif()
-  target_link_libraries(${_src_target} PRIVATE flashattention_common CUDA::cudart CUDA::cublas)
+  target_link_libraries(${_src_target} PRIVATE flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt)
 endforeach()
 
 if(benchmark_FOUND OR TARGET benchmark::benchmark OR TARGET benchmark)
@@ -218,9 +218,9 @@ if(benchmark_FOUND OR TARGET benchmark::benchmark OR TARGET benchmark)
       ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
   if(TARGET benchmark::benchmark)
-    target_link_libraries(linear_forward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas benchmark::benchmark)
+    target_link_libraries(linear_forward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt benchmark::benchmark)
   else()
-    target_link_libraries(linear_forward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas benchmark)
+    target_link_libraries(linear_forward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt benchmark)
   endif()
 
   add_executable(linear_backward_bench
@@ -234,9 +234,9 @@ if(benchmark_FOUND OR TARGET benchmark::benchmark OR TARGET benchmark)
       ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
   if(TARGET benchmark::benchmark)
-    target_link_libraries(linear_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas benchmark::benchmark)
+    target_link_libraries(linear_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt benchmark::benchmark)
   else()
-    target_link_libraries(linear_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas benchmark)
+    target_link_libraries(linear_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt benchmark)
   endif()
 
   add_executable(linear_forward_backward_bench
@@ -250,9 +250,9 @@ if(benchmark_FOUND OR TARGET benchmark::benchmark OR TARGET benchmark)
       ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
   if(TARGET benchmark::benchmark)
-    target_link_libraries(linear_forward_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas benchmark::benchmark)
+    target_link_libraries(linear_forward_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt benchmark::benchmark)
   else()
-    target_link_libraries(linear_forward_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas benchmark)
+    target_link_libraries(linear_forward_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt benchmark)
   endif()
 else()
   message(WARNING "Google Benchmark unavailable: benchmark targets are disabled.")

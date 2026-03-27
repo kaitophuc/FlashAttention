@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <utility>
 #include <optional>
+#include <cublasLt.h>
 
 struct LinearCtx {
     const Tensor* X;
