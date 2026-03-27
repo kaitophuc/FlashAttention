@@ -51,18 +51,18 @@ struct LayerNormResults {
 LayerNormResults layernorm_forward(const Tensor& X, const Tensor& gamma, const Tensor& beta, float eps, Tensor* mean, Tensor* rstd, Stream* stream); //const
 LayerNormGrads layernorm_backward(const Tensor& dY, const Tensor& X, const Tensor& gamma, const Tensor& beta, const Tensor& mean, const Tensor& rstd, float eps, Stream* stream); //const
 
-struct GeluGrads {
+struct ReluGrads {
     Tensor dX;
 };
-struct GeluCtx {
+struct ReluCtx {
     Tensor X;
 };
-struct GeluResults {
+struct ReluResults {
     Tensor Y;
-    GeluCtx ctx;
+    ReluCtx ctx;
 };
-GeluResults gelu_forward(const Tensor& X, Stream* stream); //const
-GeluGrads gelu_backward(const Tensor& dY, const Tensor& X, Stream* stream); //const
+ReluResults relu_forward(const Tensor& X, Stream* stream); //const
+ReluGrads relu_backward(const Tensor& dY, const Tensor& X, Stream* stream); //const
 
 struct DropoutCtx {
     Tensor mask;

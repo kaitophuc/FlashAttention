@@ -16,7 +16,7 @@ Target: CUDA + C++ (optionally a small Python wrapper only for data loading + pl
 
 - `src/`
   - CUDA/C++ sources (`*.cu`, `*.cpp`)
-  - `ops/`: matmul, layernorm, softmax, dropout, gelu, attention
+  - `ops/`: matmul, layernorm, softmax, dropout, relu, attention
   - `kernels/`: CUDA kernels (naive + flash)
   - `nn/`: modules: Linear, LayerNorm, MHA, MLP, TransformerBlock
   - `train/`: optimizer, dataloader, training loop
@@ -156,7 +156,7 @@ Option A (recommended): use cuBLAS first.
 - Forward: reduction for mean/var + normalize + affine.
 - Backward: numerically correct gradients.
 
-### 2.3 GELU / SwiGLU
+### 2.3 RELU
 
 #### Deliverables
 
@@ -352,7 +352,7 @@ Pick 3–5 features.
 
 ## Next planned implementation order
 
-1. `ops/` core primitives (GEMM + LayerNorm + GELU/SwiGLU)
+1. `ops/` core primitives (GEMM + LayerNorm + RELU)
 2. naive attention forward/backward
 3. minimal block-level Transformer forward/backward
 4. FlashAttention forward v1 then v2
