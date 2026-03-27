@@ -18,6 +18,7 @@ bench/run.sh -- <binary-args...>
 ```bash
 bench/run.sh bench/tensor_bandwidth_bench.cu
 bench/run.sh bench/linear_forward_bench.cu
+bench/run.sh bench/linear_backward_bench.cu
 bench/run.sh bench/tensor_bandwidth_bench.cu -- --iters=50
 bench/run.sh bench/tensor_bandwidth_bench.cu -- --benchmark_filter=BM_CopyD2D
 bench/run.sh -- --benchmark_filter=BM_CopyD2D
@@ -27,6 +28,7 @@ bench/run.sh -- --benchmark_filter=BM_CopyD2D
 
 - `bench/tensor_bandwidth_bench.cu` -> `tensor_bandwidth_bench`
 - `bench/linear_forward_bench.cu` -> `linear_forward_bench`
+- `bench/linear_backward_bench.cu` -> `linear_backward_bench`
 - Fallback: `bench/xxx.cu` -> `xxx`
 
 If a new benchmark file uses a different target name, update `bench/run.sh`.
@@ -65,3 +67,23 @@ Config knobs (optional environment variables):
 - `FA_LINEAR_SHAPES` (default `bench/linear_shapes.csv`)
 - `FA_LINEAR_WARMUP` (default `50`)
 - `FA_LINEAR_ITERS` (default `200`)
+
+## Linear Backward vs PyTorch Compare
+
+Run native CUDA linear backward benchmark and compare with PyTorch:
+
+```bash
+bench/run_linear_backward_compare.sh
+```
+
+Outputs:
+
+- `bench/results/native_linear_backward_<timestamp>.csv`
+- `bench/results/torch_linear_backward_<timestamp>.csv`
+- `bench/results/linear_backward_compare_<timestamp>.csv`
+
+Config knobs (optional environment variables):
+
+- `FA_LINEAR_BWD_SHAPES` (default `bench/linear_shapes.csv`)
+- `FA_LINEAR_BWD_WARMUP` (default `50`)
+- `FA_LINEAR_BWD_ITERS` (default `200`)

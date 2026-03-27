@@ -222,6 +222,22 @@ if(benchmark_FOUND OR TARGET benchmark::benchmark OR TARGET benchmark)
   else()
     target_link_libraries(linear_forward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas benchmark)
   endif()
+
+  add_executable(linear_backward_bench
+    bench/linear_backward_bench.cu
+    src/cu_stream.cu
+    src/ops_linear.cu
+  )
+  target_include_directories(linear_backward_bench
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  if(TARGET benchmark::benchmark)
+    target_link_libraries(linear_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas benchmark::benchmark)
+  else()
+    target_link_libraries(linear_backward_bench PRIVATE flashattention_common CUDA::cudart CUDA::cublas benchmark)
+  endif()
 else()
   message(WARNING "Google Benchmark unavailable: benchmark targets are disabled.")
 endif()
