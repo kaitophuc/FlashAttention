@@ -11,6 +11,7 @@ usage() {
   echo "  bench/run.sh bench/tensor_bandwidth_bench.cu"
   echo "  bench/run.sh bench/linear_forward_bench.cu"
   echo "  bench/run.sh bench/linear_backward_bench.cu"
+  echo "  bench/run.sh bench/linear_forward_backward_bench.cu"
   echo "  bench/run.sh -- --benchmark_filter=BM_CopyD2D"
 }
 
