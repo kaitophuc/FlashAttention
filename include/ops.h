@@ -56,14 +56,14 @@ struct ReluGrads {
     Tensor dX;
 };
 struct ReluCtx {
-    Tensor X;
+    const Tensor* X;
 };
 struct ReluResults {
     Tensor Y;
     ReluCtx ctx;
 };
 ReluResults relu_forward(const Tensor& X, Stream* stream); //const
-ReluGrads relu_backward(const Tensor& dY, const Tensor& X, Stream* stream); //const
+ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream* stream); //const
 
 struct DropoutCtx {
     Tensor mask;
