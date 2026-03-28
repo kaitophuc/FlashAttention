@@ -1,5 +1,6 @@
 #include "ops.h"
 #include <cub/cub.cuh>
+#include <cfloat>
 
 struct MaxOp {
     __device__ __forceinline__ float operator()(const float& a, const float& b) const {
@@ -11,14 +12,26 @@ template <int BLOCK_SIZE>
 __inline__ __device__ float blockReduceMax(float val) {
     typedef cub::BlockReduce<float, BLOCK_SIZE> BlockReduce;
     __shared__ typename BlockReduce::TempStorage temp_storage;
-    return BlockReduce(temp_storage).Reduce(val, MaxOp{});
+    __shared__ float block_max;
+    const float reduced = BlockReduce(temp_storage).Reduce(val, MaxOp{});
+    if (threadIdx.x == 0) {
+        block_max = reduced;
+    }
+    __syncthreads();
+    return block_max;
 }
 
 template <int BLOCK_SIZE>
 __inline__ __device__ float blockReduceSum(float val) {
     typedef cub::BlockReduce<float, BLOCK_SIZE> BlockReduce;
     __shared__ typename BlockReduce::TempStorage temp_storage;
-    return BlockReduce(temp_storage).Sum(val);
+    __shared__ float block_sum;
+    const float reduced = BlockReduce(temp_storage).Sum(val);
+    if (threadIdx.x == 0) {
+        block_sum = reduced;
+    }
+    __syncthreads();
+    return block_sum;
 }
 
 template <int BLOCK_SIZE>
@@ -26,7 +39,7 @@ __global__ void softmax_forward_kernel(const float* __restrict__ X, float* __res
     int row = blockIdx.x;
     if (row >= m) return;
 
-    const int row_offset = row * n;
+    const int64_t row_offset = static_cast<int64_t>(row) * n;
     // Step 1: Find the max value in the row for numerical stability.
     float thread_max = -FLT_MAX;
     for (int col = threadIdx.x; col < n; col += BLOCK_SIZE) {
@@ -55,7 +68,7 @@ __global__ void softmax_backward_kernel(const float* __restrict__ dY, const floa
     int row = blockIdx.x;
     if (row >= m) return;   
 
-    const int row_offset = row * n;
+    const int64_t row_offset = static_cast<int64_t>(row) * n;
     // Step 1: Compute the dot product of Y and dY for the current row
     float thread_dot = 0.0f;
     for (int col = threadIdx.x; col < n; col += BLOCK_SIZE) {
@@ -70,7 +83,7 @@ __global__ void softmax_backward_kernel(const float* __restrict__ dY, const floa
 }
 
 
-SoftmaxCtx softmax_forward(const Tensor& X, Stream* stream) {
+Tensor softmax_forward(const Tensor& X, Stream* stream) {
     if (stream == nullptr) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Stream pointer cannot be null.");
     }
@@ -95,10 +108,10 @@ SoftmaxCtx softmax_forward(const Tensor& X, Stream* stream) {
     constexpr int BLOCK_SIZE = 256;
     softmax_forward_kernel<BLOCK_SIZE><<<m, BLOCK_SIZE, 0, stream->s>>>(static_cast<const float*>(X.data_), static_cast<float*>(Y.data_), m, n);
 
-    return SoftmaxCtx{.Y = &Y, .m = m, .n = n};
+    return std::move(Y);
 }
 
-SoftmaxGrads softmax_backward(const Tensor& dY, const SoftmaxCtx& ctx, Stream* stream) {
+SoftmaxGrads softmax_backward(const Tensor& dY, const Tensor& Y, Stream* stream) {
     if (stream == nullptr) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Stream pointer cannot be null.");
     }
@@ -108,11 +121,9 @@ SoftmaxGrads softmax_backward(const Tensor& dY, const SoftmaxCtx& ctx, Stream* s
     if (dY.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Only float32 tensors are supported.");
     }
-    if (dY.shape_ != ctx.Y->shape_) {
+    if (dY.shape_ != Y.shape_) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_backward: dY shape must match Y shape from the forward pass.");
     }
-
-    const Tensor& Y = *ctx.Y;
 
     if (Y.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Only float32 tensors are supported.");
@@ -123,10 +134,18 @@ SoftmaxGrads softmax_backward(const Tensor& dY, const SoftmaxCtx& ctx, Stream* s
     if (Y.shape_ != dY.shape_) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Y and dY shapes must match.");
     }
+    if (Y.shape_.size() != 2) {
+        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Y must be a 2D tensor.");
+    }
+    const int64_t m = Y.shape_[0];
+    const int64_t n = Y.shape_[1];
+    if (m <= 0 || n <= 0) {
+        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Y dimensions must be greater than zero.");
+    }
 
     Tensor dX = Tensor::empty(Y.shape_, Y.dtype_, Y.device_, *stream);
     constexpr int BLOCK_SIZE = 256;
-    softmax_backward_kernel<BLOCK_SIZE><<<ctx.m, BLOCK_SIZE, 0, stream->s>>>(static_cast<const float*>(dY.data_), static_cast<const float*>(Y.data_), static_cast<float*>(dX.data_), ctx.m, ctx.n);
+    softmax_backward_kernel<BLOCK_SIZE><<<m, BLOCK_SIZE, 0, stream->s>>>(static_cast<const float*>(dY.data_), static_cast<const float*>(Y.data_), static_cast<float*>(dX.data_), m, n);
 
     return SoftmaxGrads{std::move(dX)};
 }

@@ -85,13 +85,8 @@ struct DropoutResults {
 DropoutResults dropout_forward(const Tensor& X, float p, bool training, uint64_t seed, Stream* stream);
 Tensor dropout_backward(const Tensor& dY, const DropoutCtx& ctx, Stream* stream);
 
-struct SoftmaxCtx {
-    const Tensor* Y;
-    int64_t m;
-    int64_t n;
-};
 struct SoftmaxGrads {
     Tensor dX;
 };
-SoftmaxCtx softmax_forward(const Tensor& X, Stream* stream);
-SoftmaxGrads softmax_backward(const Tensor& dY, const SoftmaxCtx& ctx, Stream* stream);
+Tensor softmax_forward(const Tensor& X, Stream* stream);
+SoftmaxGrads softmax_backward(const Tensor& dY, const Tensor& Y, Stream* stream);
