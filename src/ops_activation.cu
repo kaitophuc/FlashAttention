@@ -108,19 +108,19 @@ __global__ void relu_backward_vec4_kernel(
 ReluResults relu_forward(const Tensor& X, Stream* stream) {
     // Check input shapes and dtypes. At this point, we only support float32 tensors and default streams.
     if (stream == nullptr) {
-        throw std::invalid_argument("relu_forward requires a non-null stream.");
+        throw std::invalid_argument("ops_activation.cu: Relu_forward: Stream pointer cannot be null.");
     }
     if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("relu_forward currently only supports the default stream.");
+        throw std::invalid_argument("ops_activation.cu: Relu_forward: Only the default stream is supported at this phase.");
     }
     if (X.dtype_ != DType::F32) {
-        throw std::invalid_argument("relu_forward only supports float32 tensors.");
+        throw std::invalid_argument("ops_activation.cu: Relu_forward: Only float32 tensors are supported.");
     }
     if (X.device_ != Device::CUDA) {
-        throw std::invalid_argument("relu_forward only supports CUDA tensors.");
+        throw std::invalid_argument("ops_activation.cu: Relu_forward: Only CUDA tensors are supported.");
     }
     if (X.shape_.size() != 2) {
-        throw std::invalid_argument("relu_forward only supports 2D tensors.");
+        throw std::invalid_argument("ops_activation.cu: Relu_forward: X must be a 2D tensor.");
     }
     
     // Allocate output tensor.
@@ -157,37 +157,37 @@ ReluResults relu_forward(const Tensor& X, Stream* stream) {
 ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream* stream) {
     // Check input shapes and dtypes. At this point, we only support float32 tensors and default streams.
     if (stream == nullptr) {
-        throw std::invalid_argument("relu_backward requires a non-null stream.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: Stream pointer cannot be null.");
     }
     if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("relu_backward currently only supports the default stream.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: Only the default stream is supported at this phase.");
     }
     if (ctx.X == nullptr) {
-        throw std::invalid_argument("relu_backward requires ctx.X to be non-null.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: ctx.X cannot be null.");
     }
     if (ctx.X->shape_.size() != 2) {
-        throw std::invalid_argument("relu_backward requires ctx.X to be a 2D tensor.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: ctx.X must be a 2D tensor.");
     }
     if (dY.shape_.size() != 2) {
-        throw std::invalid_argument("relu_backward only supports 2D tensors.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: dY must be a 2D tensor.");
     }
     if (dY.dtype_ != DType::F32) {
-        throw std::invalid_argument("relu_backward only supports float32 tensors.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: Only float32 tensors are supported.");
     }
     if (ctx.X->dtype_ != DType::F32) {
-        throw std::invalid_argument("relu_backward requires ctx.X to be float32.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: ctx.X must be float32.");
     }
     if (dY.dtype_ != ctx.X->dtype_) {
-        throw std::invalid_argument("relu_backward requires dY and ctx.X to have the same dtype.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: dY and ctx.X dtypes must match.");
     }
     if (dY.device_ != Device::CUDA || ctx.X->device_ != Device::CUDA) {
-        throw std::invalid_argument("relu_backward only supports CUDA tensors.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: Only CUDA tensors are supported.");
     }
     if (dY.device_ != ctx.X->device_) {
-        throw std::invalid_argument("relu_backward requires dY and ctx.X to be on the same device.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: dY and ctx.X must be on the same device.");
     }
     if (dY.shape_ != ctx.X->shape_) {
-        throw std::invalid_argument("relu_backward requires dY to have the same shape as the original input X.");
+        throw std::invalid_argument("ops_activation.cu: Relu_backward: dY shape must match original input X shape.");
     }
 
     // Allocate output tensor for dX.

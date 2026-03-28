@@ -57,39 +57,39 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
     // At this phase, assume all tensors are in Float32 for simplicity. In a full implementation, we would handle different dtypes and possibly mixed precision.
     // currently disable CPU support, so we can assume all tensors are on CUDA device.
     if (stream == nullptr) {
-        throw std::invalid_argument("stream must not be null.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Stream pointer cannot be null.");
     }
     if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Only the default stream is supported at this phase.");
     }
     if (X.dtype_ != DType::F32 || W.dtype_ != DType::F32) {
-        throw std::invalid_argument("Currently only Float32 dtype is supported for X and W.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Only float32 tensors are supported.");
     }
     if (X.shape_.size() != 2 || W.shape_.size() != 2) {
-        throw std::invalid_argument("X and W must be 2D tensors.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: X and W must be 2D tensors.");
     }
     if (X.dtype_ != W.dtype_) {
-        throw std::invalid_argument("X and W must have the same dtype.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: X and W dtypes must match.");
     }
     if (b != nullptr) {
         if (b->shape_.size() != 1 || b->shape_[0] != W.shape_[0]) {
-            throw std::invalid_argument("Bias b must be a 1D tensor with shape matching output features.");
+            throw std::invalid_argument("ops_linear.cu: Linear_forward: Bias b must be a 1D tensor with shape matching output features.");
         }
         if (b->dtype_ != X.dtype_) {
-            throw std::invalid_argument("Bias b must have the same dtype as X and W.");
+            throw std::invalid_argument("ops_linear.cu: Linear_forward: Bias b dtype must match X and W.");
         }
     }
     if (X.device_ != W.device_) {
-        throw std::invalid_argument("X and W must be on the same device.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: X and W must be on the same device.");
     }
     if (b != nullptr && b->device_ != X.device_) {
-        throw std::invalid_argument("Bias b must be on the same device as X and W.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Bias b must be on the same device as X and W.");
     }
     if (X.shape_[1] != W.shape_[1]) {
-        throw std::invalid_argument("Inner dimensions of X and W must match.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Inner dimensions of X and W must match.");
     }
     if (X.device_ != Device::CUDA || W.device_ != Device::CUDA) {
-        throw std::invalid_argument("Currently only CUDA device is supported.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Only CUDA tensors are supported.");
     }
 
     // Create output tensor Y.
@@ -138,39 +138,39 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
     // At this phase, assume all tensors are in Float32 for simplicity. In a full implementation, we would handle different dtypes and possibly mixed precision.
     // currently disable CPU support, so we can assume all tensors are on CUDA device.
     if (stream == nullptr) {
-        throw std::invalid_argument("stream must not be null.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Stream pointer cannot be null.");
     }
     if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Only the default stream is supported at this phase.");
     }
     if (X.dtype_ != DType::F32 || W.dtype_ != DType::F32) {
-        throw std::invalid_argument("Currently only Float32 dtype is supported for X and W.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Only float32 tensors are supported.");
     }
     if (X.shape_.size() != 2 || W.shape_.size() != 2) {
-        throw std::invalid_argument("X and W must be 2D tensors.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: X and W must be 2D tensors.");
     }
     if (X.dtype_ != W.dtype_) {
-        throw std::invalid_argument("X and W must have the same dtype.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: X and W dtypes must match.");
     }
     if (b != nullptr) {
         if (b->shape_.size() != 1 || b->shape_[0] != W.shape_[0]) {
-            throw std::invalid_argument("Bias b must be a 1D tensor with shape matching output features.");
+            throw std::invalid_argument("ops_linear.cu: Linear_forward: Bias b must be a 1D tensor with shape matching output features.");
         }
         if (b->dtype_ != X.dtype_) {
-            throw std::invalid_argument("Bias b must have the same dtype as X and W.");
+            throw std::invalid_argument("ops_linear.cu: Linear_forward: Bias b dtype must match X and W.");
         }
     }
     if (X.device_ != W.device_) {
-        throw std::invalid_argument("X and W must be on the same device.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: X and W must be on the same device.");
     }
     if (b != nullptr && b->device_ != X.device_) {
-        throw std::invalid_argument("Bias b must be on the same device as X and W.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Bias b must be on the same device as X and W.");
     }
     if (X.shape_[1] != W.shape_[1]) {
-        throw std::invalid_argument("Inner dimensions of X and W must match.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Inner dimensions of X and W must match.");
     }
     if (X.device_ != Device::CUDA || W.device_ != Device::CUDA) {
-        throw std::invalid_argument("Currently only CUDA device is supported.");
+        throw std::invalid_argument("ops_linear.cu: Linear_forward: Only CUDA tensors are supported.");
     }
 
     // Create output tensor Y.
@@ -263,34 +263,34 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
 LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_dX, bool needs_dW, bool needs_db, Stream* stream, CublasHandle& handle) {
     // Check input shapes and dtypes.
     if (stream == nullptr) {
-        throw std::invalid_argument("stream must not be null.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: Stream pointer cannot be null.");
     }
     if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: Only the default stream is supported at this phase.");
     }
     if (ctx.X == nullptr || ctx.W == nullptr) {
-        throw std::invalid_argument("LinearCtx contains null tensor pointers.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: LinearCtx contains null tensor pointers.");
     }
     if (dY.dtype_ != DType::F32) {
-        throw std::invalid_argument("Currently only Float32 dtype is supported for dY.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: Only float32 tensors are supported.");
     }
     if (dY.shape_.size() != 2) {
-        throw std::invalid_argument("dY must be a 2D tensor.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: dY must be a 2D tensor.");
     }
     if (dY.dtype_ != ctx.X->dtype_ || dY.dtype_ != ctx.W->dtype_) {
-        throw std::invalid_argument("dY must have the same dtype as X and W.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: dY dtype must match X and W.");
     }
     if (dY.device_ != ctx.X->device_ || dY.device_ != ctx.W->device_) {
-        throw std::invalid_argument("dY must be on the same device as X and W.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: dY must be on the same device as X and W.");
     }
     if (dY.shape_[0] != ctx.m || dY.shape_[1] != ctx.n) {
-        throw std::invalid_argument("Shape of dY must match output shape of forward pass.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: dY shape must match output shape of forward pass.");
     }
     if (ctx.has_bias && needs_db && (ctx.n <= 0)) {
-        throw std::invalid_argument("Invalid shape for bias gradient.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: Invalid shape for bias gradient.");
     }
     if (ctx.k <= 0) {
-        throw std::invalid_argument("Invalid inner dimension k in context.");
+        throw std::invalid_argument("ops_linear.cu: Linear_backward: Invalid inner dimension k in context.");
     }
 
     std::optional<Tensor> dX;

@@ -193,7 +193,7 @@ inline std::vector<float> reference_relu_forward(const std::vector<float>& x) {
 inline std::vector<float> reference_relu_backward(const std::vector<float>& dY,
                                                   const std::vector<float>& x) {
     if (dY.size() != x.size()) {
-        throw std::invalid_argument("reference_relu_backward requires dY and x to have same size");
+        throw std::invalid_argument("test_relu.h: reference_relu_backward requires dY and x to have same size");
     }
     std::vector<float> dX(dY.size());
     for (size_t i = 0; i < dY.size(); ++i) {

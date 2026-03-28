@@ -20,7 +20,7 @@ struct Stream {
 
     explicit Stream(cudaStream_t stream) {
         if (stream != cudaStream_t(0)) {
-            throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+            throw std::invalid_argument("cu_stream.h: Stream argument should be the default stream at this phase.");
         }
         s = stream;
         owns_ = false;

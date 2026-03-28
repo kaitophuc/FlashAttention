@@ -164,34 +164,34 @@ LayerNormResults layernorm_forward(const Tensor& X,
                                    float eps,
                                    Stream* stream) {
     if (stream == nullptr) {
-        throw std::invalid_argument("layernorm_forward requires a non-null stream.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: Stream pointer cannot be null.");
     }
     if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("layernorm_forward currently only supports the default stream.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: Only the default stream is supported at this phase.");
     }
     if (eps <= 0.0f) {
-        throw std::invalid_argument("layernorm_forward requires eps > 0.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: eps must be greater than 0.");
     }
     if (X.dtype_ != DType::F32 || gamma.dtype_ != DType::F32 || beta.dtype_ != DType::F32) {
-        throw std::invalid_argument("layernorm_forward only supports float32 tensors.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: Only float32 tensors are supported.");
     }
     if (X.device_ != Device::CUDA || gamma.device_ != Device::CUDA || beta.device_ != Device::CUDA) {
-        throw std::invalid_argument("layernorm_forward only supports CUDA tensors.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: Only CUDA tensors are supported.");
     }
     if (X.shape_.size() != 2) {
-        throw std::invalid_argument("layernorm_forward expects X to be 2D [m, n].");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: X must be a 2D tensor [m, n].");
     }
     if (gamma.shape_.size() != 1 || beta.shape_.size() != 1) {
-        throw std::invalid_argument("layernorm_forward expects gamma and beta to be 1D [n].");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: gamma and beta must be 1D tensors [n].");
     }
     if (gamma.shape_[0] != X.shape_[1] || beta.shape_[0] != X.shape_[1]) {
-        throw std::invalid_argument("layernorm_forward requires gamma/beta size to match X's last dimension.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: gamma and beta sizes must match X last dimension.");
     }
 
     const int64_t m64 = X.shape_[0];
     const int64_t n64 = X.shape_[1];
     if (m64 <= 0 || n64 <= 0) {
-        throw std::invalid_argument("layernorm_forward requires positive dimensions.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: Input dimensions must be greater than zero.");
     }
 
     const int m = static_cast<int>(m64);
@@ -223,16 +223,16 @@ LayerNormGrads layernorm_backward(const Tensor& dY,
                                   bool needs_dbeta,
                                   Stream* stream) {
     if (stream == nullptr) {
-        throw std::invalid_argument("layernorm_backward requires a non-null stream.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: Stream pointer cannot be null.");
     }
     if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("layernorm_backward currently only supports the default stream.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: Only the default stream is supported at this phase.");
     }
     if (ctx.X == nullptr || ctx.gamma == nullptr) {
-        throw std::invalid_argument("layernorm_backward requires non-null ctx.X and ctx.gamma.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: ctx.X and ctx.gamma cannot be null.");
     }
     if (ctx.eps <= 0.0f) {
-        throw std::invalid_argument("layernorm_backward requires ctx.eps > 0.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: ctx.eps must be greater than 0.");
     }
 
     const Tensor& X = *ctx.X;
@@ -242,26 +242,26 @@ LayerNormGrads layernorm_backward(const Tensor& dY,
 
     if (dY.dtype_ != DType::F32 || X.dtype_ != DType::F32 || gamma.dtype_ != DType::F32 ||
         mean.dtype_ != DType::F32 || rstd.dtype_ != DType::F32) {
-        throw std::invalid_argument("layernorm_backward only supports float32 tensors.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: Only float32 tensors are supported.");
     }
     if (dY.device_ != Device::CUDA || X.device_ != Device::CUDA || gamma.device_ != Device::CUDA ||
         mean.device_ != Device::CUDA || rstd.device_ != Device::CUDA) {
-        throw std::invalid_argument("layernorm_backward only supports CUDA tensors.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: Only CUDA tensors are supported.");
     }
     if (X.shape_.size() != 2 || dY.shape_.size() != 2) {
-        throw std::invalid_argument("layernorm_backward expects X and dY to be 2D [m, n].");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: X and dY must be 2D tensors [m, n].");
     }
     if (gamma.shape_.size() != 1 || mean.shape_.size() != 1 || rstd.shape_.size() != 1) {
-        throw std::invalid_argument("layernorm_backward expects gamma/mean/rstd to be 1D.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: gamma, mean, and rstd must be 1D tensors.");
     }
     if (dY.shape_ != X.shape_) {
-        throw std::invalid_argument("layernorm_backward requires dY shape to match X shape.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: dY shape must match X shape.");
     }
     if (X.shape_[0] != ctx.m || X.shape_[1] != ctx.n) {
-        throw std::invalid_argument("layernorm_backward context shape does not match X.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: Context shape must match X shape.");
     }
     if (gamma.shape_[0] != ctx.n || mean.shape_[0] != ctx.m || rstd.shape_[0] != ctx.m) {
-        throw std::invalid_argument("layernorm_backward context tensors have invalid shapes.");
+        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: Context tensor shapes are invalid.");
     }
 
     const int m = static_cast<int>(ctx.m);

@@ -44,7 +44,7 @@ Tensor MakeCpuTensor1D(int n, const std::vector<float>& values) {
 
 float Dot(const std::vector<float>& a, const std::vector<float>& b) {
     if (a.size() != b.size()) {
-        throw std::invalid_argument("Dot inputs must have the same size.");
+        throw std::invalid_argument("test_layernorm.cu: Dot inputs must have the same size.");
     }
     double acc = 0.0;
     for (size_t i = 0; i < a.size(); ++i) {
@@ -62,7 +62,7 @@ __global__ void affine_inplace_kernel(float* data, int n, float scale, float bia
 
 void ApplyAffineInplaceF32(Tensor& t, float scale, float bias, Stream& stream) {
     if (t.dtype_ != DType::F32 || t.device_ != Device::CUDA) {
-        throw std::invalid_argument("ApplyAffineInplaceF32 expects CUDA float tensor.");
+        throw std::invalid_argument("test_layernorm.cu: ApplyAffineInplaceF32 expects CUDA float tensor.");
     }
     const int n = static_cast<int>(t.numel());
     const int block = 256;

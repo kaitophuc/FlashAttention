@@ -175,10 +175,10 @@ inline LayerNormRefForward reference_layernorm_forward(const std::vector<float>&
                                                        int n,
                                                        float eps) {
     if (static_cast<int>(x.size()) != m * n) {
-        throw std::invalid_argument("reference_layernorm_forward: x has invalid size");
+        throw std::invalid_argument("test_layernorm.h: reference_layernorm_forward: x has invalid size");
     }
     if (static_cast<int>(gamma.size()) != n || static_cast<int>(beta.size()) != n) {
-        throw std::invalid_argument("reference_layernorm_forward: gamma/beta have invalid size");
+        throw std::invalid_argument("test_layernorm.h: reference_layernorm_forward: gamma/beta have invalid size");
     }
 
     LayerNormRefForward out;
@@ -227,10 +227,10 @@ inline LayerNormRefBackward reference_layernorm_backward(const std::vector<float
                                                          bool needs_dgamma,
                                                          bool needs_dbeta) {
     if (static_cast<int>(dY.size()) != m * n || static_cast<int>(x.size()) != m * n) {
-        throw std::invalid_argument("reference_layernorm_backward: x/dY have invalid size");
+        throw std::invalid_argument("test_layernorm.h: reference_layernorm_backward: x/dY have invalid size");
     }
     if (static_cast<int>(gamma.size()) != n || static_cast<int>(mean.size()) != m || static_cast<int>(rstd.size()) != m) {
-        throw std::invalid_argument("reference_layernorm_backward: gamma/mean/rstd have invalid size");
+        throw std::invalid_argument("test_layernorm.h: reference_layernorm_backward: gamma/mean/rstd have invalid size");
     }
 
     LayerNormRefBackward out;

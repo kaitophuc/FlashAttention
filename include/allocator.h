@@ -58,7 +58,7 @@ inline auto allocate_device(size_t bytes) -> void* {
 // Explicitly specify stream for allocation.
 inline auto allocate_device(size_t bytes, Stream& stream) -> void* {
     if (stream.s != cudaStream_t(0)) {
-        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+        throw std::invalid_argument("allocator.h: Stream argument should be the default stream at this phase.");
     }
     void* ptr;
     if (can_use_async_pool_cached()) {
@@ -82,7 +82,7 @@ inline void deallocate_device(void* ptr) {
 // Explicitly specify stream for deallocation.
 inline void deallocate_device(void* ptr, Stream& stream) {
     if (stream.s != cudaStream_t(0)) {
-        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+        throw std::invalid_argument("allocator.h: Stream argument should be the default stream at this phase.");
     }
     if (can_use_async_pool_cached()) {
         CUDA_CHECK(cudaFreeAsync(ptr, stream.s));

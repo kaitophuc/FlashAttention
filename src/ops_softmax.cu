@@ -72,22 +72,22 @@ __global__ void softmax_backward_kernel(const float* __restrict__ dY, const floa
 
 SoftmaxCtx softmax_forward(const Tensor& X, Stream* stream) {
     if (stream == nullptr) {
-        throw std::invalid_argument("Stream pointer cannot be null.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Stream pointer cannot be null.");
     }
     if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Only the default stream is supported at this phase.");
     }
     if (X.dtype_ != DType::F32) {
-        throw std::invalid_argument("Softmax only supports float32 data type.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Only float32 tensors are supported.");
     }
     if (X.shape_.size() != 2) {
-        throw std::invalid_argument("Softmax only supports 2D input tensors.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_forward: X must be a 2D tensor.");
     }
 
     const int64_t m = X.shape_[0];
     const int64_t n = X.shape_[1];
     if (m <= 0 || n <= 0) {
-        throw std::invalid_argument("Softmax input dimensions must be greater than zero.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Input dimensions must be greater than zero.");
     }
 
     Tensor Y = Tensor::empty(X.shape_, X.dtype_, X.device_, *stream);
@@ -100,28 +100,28 @@ SoftmaxCtx softmax_forward(const Tensor& X, Stream* stream) {
 
 SoftmaxGrads softmax_backward(const Tensor& dY, const SoftmaxCtx& ctx, Stream* stream) {
     if (stream == nullptr) {
-        throw std::invalid_argument("Stream pointer cannot be null.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Stream pointer cannot be null.");
     }
     if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("Stream argument should be the default stream at this phase.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Only the default stream is supported at this phase.");
     }
     if (dY.dtype_ != DType::F32) {
-        throw std::invalid_argument("Softmax backward only supports float32 data type.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Only float32 tensors are supported.");
     }
     if (dY.shape_ != ctx.Y->shape_) {
-        throw std::invalid_argument("Shape of dY must match the shape of Y from the forward pass.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: dY shape must match Y shape from the forward pass.");
     }
 
     const Tensor& Y = *ctx.Y;
 
     if (Y.dtype_ != DType::F32) {
-        throw std::invalid_argument("Softmax backward only supports float32 data type for Y.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Only float32 tensors are supported.");
     }
     if (Y.device_ != dY.device_) {
-        throw std::invalid_argument("Y and dY must be on the same device.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Y and dY must be on the same device.");
     }
     if (Y.shape_ != dY.shape_) {
-        throw std::invalid_argument("Shape of Y and dY must match.");
+        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Y and dY shapes must match.");
     }
 
     Tensor dX = Tensor::empty(Y.shape_, Y.dtype_, Y.device_, *stream);
