@@ -15,12 +15,19 @@ COMPARE_CSV="${RESULT_DIR}/linear_compare_${RUN_TS}.csv"
 
 mkdir -p "$RESULT_DIR"
 
-cmake -S . -B build
+CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
+FA_AUTO_FETCH_BENCHMARK="${FA_AUTO_FETCH_BENCHMARK:-ON}"
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
+  -DFA_BUILD_BENCHMARKS=ON \
+  -DFA_BUILD_TESTS=OFF \
+  -DFA_BUILD_PYTHON=OFF \
+  -DFA_AUTO_FETCH_BENCHMARK="${FA_AUTO_FETCH_BENCHMARK}"
 
 targets_help="$(cmake --build build --target help 2>/dev/null || true)"
 if [[ "$targets_help" != *"linear_forward_bench"* ]]; then
   echo "error: linear_forward_bench target is unavailable." >&2
-  echo "hint: install Google Benchmark and reconfigure." >&2
+  echo "hint: ensure Google Benchmark is installed or set FA_AUTO_FETCH_BENCHMARK=ON." >&2
   exit 1
 fi
 
@@ -34,20 +41,20 @@ FA_LINEAR_SHAPES="$SHAPES_CSV" FA_LINEAR_WARMUP="$WARMUP" FA_LINEAR_ITERS="$ITER
   --benchmark_color=false
 
 echo "[2/4] Running PyTorch benchmark"
-python3 tools/bench_linear_pytorch.py \
+python3 bench/bench_linear_pytorch.py \
   --shapes "$SHAPES_CSV" \
   --output "$TORCH_CSV" \
   --warmup "$WARMUP" \
   --iters "$ITERS"
 
 echo "[3/4] Comparing results"
-python3 tools/compare_linear_bench.py \
+python3 bench/compare_linear_bench.py \
   --native "$NATIVE_CSV" \
   --torch "$TORCH_CSV" \
   --output "$COMPARE_CSV"
 
 echo "[4/4] Plotting comparison charts"
-if ! python3 tools/plot_linear_compare.py --compare "$COMPARE_CSV" --outdir "$RESULT_DIR"; then
+if ! python3 bench/plot_linear_compare.py --compare "$COMPARE_CSV" --outdir "$RESULT_DIR"; then
   echo "warning: chart generation failed (install matplotlib to enable plots)." >&2
 fi
 

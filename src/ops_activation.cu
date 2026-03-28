@@ -136,7 +136,7 @@ ReluResults relu_forward(const Tensor& X, Stream* stream) {
         ((reinterpret_cast<uintptr_t>(x_ptr) | reinterpret_cast<uintptr_t>(y_ptr)) &
          (alignof(float4) - 1)) == 0;
 
-    if (aligned_for_vec4 && total_elements >= 4) {
+    if (aligned_for_vec4 && total_elements >= 4 && (total_elements % 4 == 0)) {
         const int total_vec4_chunks = (total_elements + 3) / 4;
         const int vec_grid_size = (total_vec4_chunks + block_size - 1) / block_size;
 
@@ -201,10 +201,11 @@ ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream* stream) {
     float* dx_ptr = static_cast<float*>(dX.data_);
 
     const bool aligned_for_vec4 =
-        ((reinterpret_cast<uintptr_t>(x_ptr) | reinterpret_cast<uintptr_t>(dx_ptr)) &
+        ((reinterpret_cast<uintptr_t>(dy_ptr) | reinterpret_cast<uintptr_t>(x_ptr) |
+          reinterpret_cast<uintptr_t>(dx_ptr)) &
          (alignof(float4) - 1)) == 0;
 
-    if (aligned_for_vec4 && total_elements >= 4) {
+    if (aligned_for_vec4 && total_elements >= 4 && (total_elements % 4 == 0)) {
         const int total_vec4_chunks = (total_elements + 3) / 4;
         const int vec_grid_size = (total_vec4_chunks + block_size - 1) / block_size;
 

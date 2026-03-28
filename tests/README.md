@@ -1,60 +1,75 @@
-# Tests Runner
+# Tests
 
-Use the local script in this folder to run all GoogleTests or a specific test source.
-Reusable test helpers are under `tests/include/`.
+This folder contains:
 
-## Usage
+- C++ GoogleTest sources (`tests/test_*.cu`),
+- shared C++ test helpers (`tests/include/`),
+- Python API tests (`tests/python/test_*.py`),
+- runner scripts (`tests/run.sh`, `tests/run_python_tests.sh`).
+
+## C++ Tests (`tests/run.sh`)
+
+Run all discovered tests:
 
 ```bash
 tests/run.sh
-tests/run.sh --label smoke
-tests/run.sh --label stress
-tests/run.sh <test-source-file> [-- <binary-args...>]
-tests/run.sh -- <binary-args...>
 ```
 
-## Examples
+Run selected groups:
+
+```bash
+tests/run.sh --label smoke
+tests/run.sh --label stress
+```
+
+Run one source file target:
 
 ```bash
 tests/run.sh tests/test_tensor.cu
-tests/run.sh tests/smoke_main.cpp
-tests/run.sh tests/test_tensor.cu -- --my_arg=value
-tests/run.sh -- --gtest_filter=TensorCorrectness.H2DAndD2HRoundTrip
-tests/run.sh tests/test_tensor.cu -- --gtest_filter=TensorCorrectness.H2DAndD2HRoundTrip
-tests/run.sh --label smoke
-FA_REQUIRE_CUDA_TESTS=1 tests/run.sh --label smoke
-FA_ENABLE_LONG_STRESS=1 tests/run.sh --label stress
+tests/run.sh tests/test_linear.cu -- --gtest_filter=LinearForward.Invariant*
 ```
 
-## Tier Labels
+Behavior notes:
 
-- `smoke`: quick correctness checks and invariants.
-- `stress`: long-running stress tests (including optional long tier).
+- Script configures with `cmake -S . -B build`.
+- Script sets default `FA_CUDA_ARCHITECTURES=120` unless overridden.
+- If no source file is provided, it runs `ctest` on discovered tests.
+- If a source file is provided, it builds and runs the mapped test binary directly.
 
-When selecting by label, `tests/run.sh` maps labels to test-name patterns.
+## Python API Tests (`tests/run_python_tests.sh`)
 
-## CI Guardrail
+Run:
 
-Set `FA_REQUIRE_CUDA_TESTS=1` to fail the run if any selected tests are skipped.
-Use this in GPU CI so "tests passed" means tests actually executed.
+```bash
+tests/run_python_tests.sh
+```
 
-## Mapping
+What it does:
 
-- `tests/test_tensor.cu` -> `fa_test_test_tensor`
-- `tests/smoke_main.cpp` -> `flashattn_smoke`
-- Fallback: `tests/test_xxx.cu` -> `fa_test_test_xxx`
+- resolves repo root from script location,
+- installs editable package (`pip install -e <repo-root>`),
+- sets `PYTHONPATH=<repo-root>/python`,
+- runs unittest discovery in `tests/python`.
 
-If a new test file uses a different target name, update `tests/run.sh`.
+Optional interpreter override:
 
-## GoogleTest
+```bash
+PYTHON_BIN=./venv/bin/python tests/run_python_tests.sh
+```
 
-`tests/test_tensor.cu` now uses GoogleTest assertions (`ASSERT_*`, `EXPECT_*`) and is discovered by CTest as:
+## CMake Target
 
-- `TensorCorrectness.AllocFreeStress`
-- `TensorCorrectness.H2DAndD2HRoundTrip`
-- `TensorCorrectness.CloneCudaToCpu_NoSegfaultAndMatches`
-- `TensorCorrectness.CloneCpuToCudaToCpu_RoundTrip`
-- `TensorCorrectness.ToVectorFromCuda_IsSynchronized`
-- `TensorCorrectness.RejectsCpuZerosWithStreamArgument`
-- `TensorCorrectness.RejectsCpuToVectorWithStreamArgument`
-- `TensorCorrectness.RejectsCpuDestinationCopyFromWithStreamArgument`
+`CMakeLists.txt` defines a convenience target:
+
+```bash
+cmake --build build --target fa_python_tests
+```
+
+This runs `tests/run_python_tests.sh`.
+
+## Guardrails and Labels
+
+- Set `FA_REQUIRE_CUDA_TESTS=1` to fail if selected tests are skipped.
+- Labels:
+  - `smoke`: fast correctness/invariant-oriented patterns.
+  - `stress`: long reuse/order stress patterns.

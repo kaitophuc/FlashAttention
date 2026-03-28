@@ -1,0 +1,25 @@
+[build-system]
+requires = [
+  "scikit-build-core>=0.10.0",
+  "pybind11>=2.11.0",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "ktorch"
+version = "0.1.0"
+description = "ktorch: minimal CUDA tensor + ops runtime"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "ktorch contributors" }]
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+wheel.packages = ["python/ktorch"]
+
+[tool.scikit-build.cmake.define]
+CMAKE_CUDA_ARCHITECTURES = "120"
+FA_BUILD_TESTS = "OFF"
+FA_BUILD_BENCHMARKS = "OFF"
+FA_BUILD_PYTHON = "ON"

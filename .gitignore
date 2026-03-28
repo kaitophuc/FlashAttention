@@ -2,6 +2,7 @@
 *.csv
 !bench/linear_shapes.csv
 /build
+/build_py
 *pyc
 /.mplcache
 *.csv

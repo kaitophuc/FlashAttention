@@ -55,11 +55,18 @@ if [[ -n "$source_file" ]]; then
   esac
 fi
 
-cmake -S . -B build
+CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
+FA_AUTO_FETCH_BENCHMARK="${FA_AUTO_FETCH_BENCHMARK:-ON}"
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
+  -DFA_BUILD_BENCHMARKS=ON \
+  -DFA_BUILD_TESTS=OFF \
+  -DFA_BUILD_PYTHON=OFF \
+  -DFA_AUTO_FETCH_BENCHMARK="${FA_AUTO_FETCH_BENCHMARK}"
 targets_help="$(cmake --build build --target help 2>/dev/null || true)"
 if [[ "$targets_help" != *"$target"* ]]; then
   echo "error: benchmark target '$target' is unavailable." >&2
-  echo "hint: install Google Benchmark and reconfigure." >&2
+  echo "hint: ensure Google Benchmark is installed or set FA_AUTO_FETCH_BENCHMARK=ON." >&2
   exit 1
 fi
 cmake --build build --target "$target" -j
