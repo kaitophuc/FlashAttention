@@ -34,23 +34,29 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
 
 
 struct LayerNormGrads {
-    Tensor dX;
-    Tensor dgamma;
-    Tensor dbeta;
+    std::optional<Tensor> dX;
+    std::optional<Tensor> dgamma;
+    std::optional<Tensor> dbeta;
+    bool has_dX;
+    bool has_dgamma;
+    bool has_dbeta;
 };
 struct LayerNormCtx {
-    Tensor Y;
-    Tensor gamma;
+    const Tensor* X;
+    const Tensor* gamma;
     Tensor mean;
     Tensor rstd;
+    float eps;
+    int64_t m;
+    int64_t n;
 };
 
 struct LayerNormResults {
     Tensor Y;
     LayerNormCtx ctx;
 };
-LayerNormResults layernorm_forward(const Tensor& X, const Tensor& gamma, const Tensor& beta, float eps, Tensor* mean, Tensor* rstd, Stream* stream); //const
-LayerNormGrads layernorm_backward(const Tensor& dY, const Tensor& X, const Tensor& gamma, const Tensor& beta, const Tensor& mean, const Tensor& rstd, float eps, Stream* stream); //const
+LayerNormResults layernorm_forward(const Tensor& X, const Tensor& gamma, const Tensor& beta, float eps, Stream* stream); //const
+LayerNormGrads layernorm_backward(const Tensor& dY, const LayerNormCtx& ctx, bool needs_dX, bool needs_dgamma, bool needs_dbeta, Stream* stream); //const
 
 struct ReluGrads {
     Tensor dX;
