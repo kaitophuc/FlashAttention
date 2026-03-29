@@ -5,8 +5,10 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#include <cstring>
 
 #include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
 #include "cublass_handle.h"
@@ -143,6 +145,92 @@ inline std::vector<float> tensor_to_list_float(const Tensor& src) {
         throw std::invalid_argument("ktorch: to_list_float only supports F32 tensors.");
     }
     return src.to_vector<float>();
+}
+
+inline py::array ensure_c_contiguous_dtype(const py::object& obj, const py::dtype& expected_dtype, const char* fn_name) {
+    py::array arr = py::array::ensure(obj);
+    if (!arr) {
+        throw std::invalid_argument(std::string(fn_name) + ": expected an object exposing the buffer protocol.");
+    }
+    if (!arr.dtype().is(expected_dtype)) {
+        throw std::invalid_argument(std::string(fn_name) + ": dtype mismatch.");
+    }
+    const bool is_c_contiguous = (arr.flags() & py::array::c_style) == py::array::c_style;
+    if (!is_c_contiguous) {
+        throw std::invalid_argument(std::string(fn_name) + ": input must be C-contiguous.");
+    }
+    return arr;
+}
+
+inline std::vector<py::ssize_t> shape_to_py(const std::vector<int64_t>& shape) {
+    std::vector<py::ssize_t> out;
+    out.reserve(shape.size());
+    for (int64_t d : shape) {
+        out.push_back(static_cast<py::ssize_t>(d));
+    }
+    return out;
+}
+
+inline void tensor_copy_from_buffer_float(Tensor& dst, const py::object& obj) {
+    if (dst.dtype_ != DType::F32) {
+        throw std::invalid_argument("ktorch: copy_from_buffer_float only supports F32 tensors.");
+    }
+    py::array arr = ensure_c_contiguous_dtype(obj, py::dtype::of<float>(), "ktorch.copy_from_buffer_float");
+    if (static_cast<size_t>(arr.size()) != dst.numel_) {
+        throw std::invalid_argument("ktorch.copy_from_buffer_float: input element count must match tensor.numel().");
+    }
+
+    if (dst.device_ == Device::CUDA) {
+        CUDA_CHECK(cudaMemcpyAsync(dst.data_, arr.data(), dst.nbytes_, cudaMemcpyHostToDevice, py_default_stream().s));
+        py_default_stream().synchronize();
+    } else {
+        std::memcpy(dst.data_, arr.data(), dst.nbytes_);
+    }
+}
+
+inline void tensor_copy_from_buffer_int32(Tensor& dst, const py::object& obj) {
+    if (dst.dtype_ != DType::I32) {
+        throw std::invalid_argument("ktorch: copy_from_buffer_int32 only supports I32 tensors.");
+    }
+    py::array arr = ensure_c_contiguous_dtype(obj, py::dtype::of<int32_t>(), "ktorch.copy_from_buffer_int32");
+    if (static_cast<size_t>(arr.size()) != dst.numel_) {
+        throw std::invalid_argument("ktorch.copy_from_buffer_int32: input element count must match tensor.numel().");
+    }
+
+    if (dst.device_ == Device::CUDA) {
+        CUDA_CHECK(cudaMemcpyAsync(dst.data_, arr.data(), dst.nbytes_, cudaMemcpyHostToDevice, py_default_stream().s));
+        py_default_stream().synchronize();
+    } else {
+        std::memcpy(dst.data_, arr.data(), dst.nbytes_);
+    }
+}
+
+inline py::array_t<float> tensor_to_numpy_float(const Tensor& src) {
+    if (src.dtype_ != DType::F32) {
+        throw std::invalid_argument("ktorch: to_numpy_float only supports F32 tensors.");
+    }
+    py::array_t<float> out(shape_to_py(src.shape_));
+    if (src.device_ == Device::CUDA) {
+        CUDA_CHECK(cudaMemcpyAsync(out.mutable_data(), src.data_, src.nbytes_, cudaMemcpyDeviceToHost, py_default_stream().s));
+        py_default_stream().synchronize();
+    } else {
+        std::memcpy(out.mutable_data(), src.data_, src.nbytes_);
+    }
+    return out;
+}
+
+inline py::array_t<int32_t> tensor_to_numpy_int32(const Tensor& src) {
+    if (src.dtype_ != DType::I32) {
+        throw std::invalid_argument("ktorch: to_numpy_int32 only supports I32 tensors.");
+    }
+    py::array_t<int32_t> out(shape_to_py(src.shape_));
+    if (src.device_ == Device::CUDA) {
+        CUDA_CHECK(cudaMemcpyAsync(out.mutable_data(), src.data_, src.nbytes_, cudaMemcpyDeviceToHost, py_default_stream().s));
+        py_default_stream().synchronize();
+    } else {
+        std::memcpy(out.mutable_data(), src.data_, src.nbytes_);
+    }
+    return out;
 }
 
 void bind_dtype_device(py::module_& m);
