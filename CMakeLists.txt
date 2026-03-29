@@ -333,6 +333,7 @@ if(FA_BUILD_PYTHON)
     bindings/python/py_ops_layernorm.cpp
     bindings/python/py_ops_relu.cpp
     bindings/python/py_ops_softmax.cpp
+    bindings/python/py_ops_classification.cpp
     bindings/python/py_ops_optimizer.cpp
   )
 

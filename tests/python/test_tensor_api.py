@@ -88,6 +88,26 @@ class TensorApiTest(unittest.TestCase):
         self.assertEqual(tuple(out.shape), (2, 2))
         assert_allclose(out.reshape(-1).tolist(), arr.reshape(-1).tolist())
 
+    def test_item_float_and_int32(self):
+        tf = ktorch.Tensor([1], dtype=ktorch.DType.F32, device=ktorch.Device.CPU)
+        tf.copy_from_list_float([3.25])
+        self.assertAlmostEqual(tf.item_float(), 3.25, places=6)
+
+        ti = ktorch.Tensor([1], dtype=ktorch.DType.I32, device=ktorch.Device.CPU)
+        ti.copy_from_list_int32([42])
+        self.assertEqual(ti.item_int32(), 42)
+
+    def test_item_rejects_wrong_dtype_or_shape(self):
+        tf = ktorch.Tensor([2], dtype=ktorch.DType.F32, device=ktorch.Device.CPU)
+        tf.copy_from_list_float([1.0, 2.0])
+        with self.assertRaises(Exception):
+            tf.item_float()
+
+        ti = ktorch.Tensor([1], dtype=ktorch.DType.I32, device=ktorch.Device.CPU)
+        ti.copy_from_list_int32([7])
+        with self.assertRaises(Exception):
+            ti.item_float()
+
 
 if __name__ == "__main__":
     unittest.main()

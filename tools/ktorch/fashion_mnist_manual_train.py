@@ -5,8 +5,6 @@ import statistics
 import time
 from typing import List, Sequence, Tuple
 
-import numpy as np
-
 import ktorch
 from ktorch import ops
 from ktorch.data import DataLoader
@@ -60,11 +58,6 @@ def make_labels_tensor(labels: Sequence[int]) -> ktorch.Tensor:
     return t
 
 
-def compute_correct_fast(logits_np: np.ndarray, labels_np: np.ndarray) -> int:
-    preds = np.argmax(logits_np, axis=1)
-    return int(np.sum(preds == labels_np))
-
-
 def next_batch(it, loader):
     try:
         return next(it), it
@@ -95,13 +88,11 @@ def train_step(batch, w1, b1, w2, b2, in_dim: int, out_dim: int, lr: float, comp
     ops.sgd_update_(b1, g1.db, lr)
 
     if not compute_metrics:
-        loss = float(loss_t.to_numpy_float().reshape(-1)[0])
+        loss = float(loss_t.item_float())
         return loss, 0, bsz
 
-    loss = float(loss_t.to_numpy_float().reshape(-1)[0])
-    logits_np = z2.to_numpy_float().reshape(bsz, out_dim)
-    labels_np = labels_t.to_numpy_int32().reshape(-1)
-    correct = compute_correct_fast(logits_np, labels_np)
+    loss = float(loss_t.item_float())
+    correct = int(ops.classification_correct_count(z2, labels_t).item_int32())
 
     return loss, correct, bsz
 
@@ -125,10 +116,8 @@ def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, out_dim: int, max_batches
 
         loss_t, _ = ops.softmax_cross_entropy_forward(z2, labels_t)
 
-        loss = float(loss_t.to_numpy_float().reshape(-1)[0])
-        logits_np = z2.to_numpy_float().reshape(bsz, out_dim)
-        labels_np = labels_t.to_numpy_int32().reshape(-1)
-        correct = compute_correct_fast(logits_np, labels_np)
+        loss = float(loss_t.item_float())
+        correct = int(ops.classification_correct_count(z2, labels_t).item_int32())
 
         total_loss += loss * bsz
         total_correct += correct

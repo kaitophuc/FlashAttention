@@ -37,6 +37,10 @@ void bind_tensor(py::module_& m) {
              "Fast path: copy tensor data into a NumPy float32 array.")
         .def("to_numpy_int32", &tensor_to_numpy_int32,
              "Fast path: copy tensor data into a NumPy int32 array.")
+        .def("item_float", &tensor_item_float,
+             "Read a scalar float32 tensor value to host.")
+        .def("item_int32", &tensor_item_int32,
+             "Read a scalar int32 tensor value to host.")
         .def_static("empty", &tensor_empty, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA)
         .def_static("zeros", &tensor_zeros, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA);
 

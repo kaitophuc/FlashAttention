@@ -233,6 +233,40 @@ inline py::array_t<int32_t> tensor_to_numpy_int32(const Tensor& src) {
     return out;
 }
 
+inline float tensor_item_float(const Tensor& src) {
+    if (src.dtype_ != DType::F32) {
+        throw std::invalid_argument("ktorch: item_float only supports F32 tensors.");
+    }
+    if (src.numel_ != 1) {
+        throw std::invalid_argument("ktorch: item_float requires a tensor with exactly one element.");
+    }
+    float out = 0.0f;
+    if (src.device_ == Device::CUDA) {
+        CUDA_CHECK(cudaMemcpyAsync(&out, src.data_, sizeof(float), cudaMemcpyDeviceToHost, py_default_stream().s));
+        py_default_stream().synchronize();
+    } else {
+        std::memcpy(&out, src.data_, sizeof(float));
+    }
+    return out;
+}
+
+inline int32_t tensor_item_int32(const Tensor& src) {
+    if (src.dtype_ != DType::I32) {
+        throw std::invalid_argument("ktorch: item_int32 only supports I32 tensors.");
+    }
+    if (src.numel_ != 1) {
+        throw std::invalid_argument("ktorch: item_int32 requires a tensor with exactly one element.");
+    }
+    int32_t out = 0;
+    if (src.device_ == Device::CUDA) {
+        CUDA_CHECK(cudaMemcpyAsync(&out, src.data_, sizeof(int32_t), cudaMemcpyDeviceToHost, py_default_stream().s));
+        py_default_stream().synchronize();
+    } else {
+        std::memcpy(&out, src.data_, sizeof(int32_t));
+    }
+    return out;
+}
+
 void bind_dtype_device(py::module_& m);
 void bind_tensor(py::module_& m);
 void bind_linear(py::module_& m);
@@ -240,4 +274,5 @@ void bind_layernorm(py::module_& m);
 void bind_relu(py::module_& m);
 void bind_softmax(py::module_& m);
 void bind_softmax_cross_entropy(py::module_& m);
+void bind_classification(py::module_& m);
 void bind_optimizer(py::module_& m);

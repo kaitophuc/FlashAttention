@@ -51,5 +51,9 @@ def softmax_cross_entropy_backward(ctx):
     return _C.softmax_cross_entropy_backward(ctx)
 
 
+def classification_correct_count(logits, labels):
+    return _C.classification_correct_count(logits, labels)
+
+
 def sgd_update_(param, grad, lr):
     return _C.sgd_update_(param, grad, lr)
