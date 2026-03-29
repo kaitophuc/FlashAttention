@@ -109,3 +109,5 @@ struct SoftmaxCrossEntropyGrads {
 
 SoftmaxCrossEntropyResults softmax_cross_entropy_forward(const Tensor& logits, const Tensor& labels, Stream* stream);
 SoftmaxCrossEntropyGrads softmax_cross_entropy_backward(const SoftmaxCrossEntropyCtx& ctx, Stream* stream);
+
+void sgd_update_(Tensor& param, const Tensor& grad, float lr, Stream* stream);

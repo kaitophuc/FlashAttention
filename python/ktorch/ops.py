@@ -49,3 +49,7 @@ def softmax_cross_entropy_forward(logits, labels):
 
 def softmax_cross_entropy_backward(ctx):
     return _C.softmax_cross_entropy_backward(ctx)
+
+
+def sgd_update_(param, grad, lr):
+    return _C.sgd_update_(param, grad, lr)

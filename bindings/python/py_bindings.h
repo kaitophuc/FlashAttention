@@ -240,3 +240,4 @@ void bind_layernorm(py::module_& m);
 void bind_relu(py::module_& m);
 void bind_softmax(py::module_& m);
 void bind_softmax_cross_entropy(py::module_& m);
+void bind_optimizer(py::module_& m);

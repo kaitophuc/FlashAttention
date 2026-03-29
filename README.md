@@ -24,6 +24,7 @@ Implemented and wired:
 
 - Tensor operations: metadata, `numel`, `nbytes`, `view`, `clone`, `zero_`, host list copy helpers.
 - Ops in both C++ and Python: `linear`, `layernorm`, `relu`, `softmax`.
+- Optimizer update op in both C++ and Python: in-place `sgd_update_` (CUDA F32).
 - C++ GoogleTests for tensor/linear/layernorm/relu/softmax.
 - Python unittests under `tests/python/`.
 - Google Benchmark targets and compare scripts under `bench/`.
@@ -36,6 +37,7 @@ Present but not fully wired:
 Practical limitations right now:
 
 - Python host I/O helpers are list-based (`copy_from_list_float`, `to_list_float`) and F32-oriented.
+- `sgd_update_` currently supports CUDA `F32` tensors only.
 - Most Python smoke/training flows are CUDA-focused.
 - There is no autograd engine yet; backward is called manually.
 
