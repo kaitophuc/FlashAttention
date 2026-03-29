@@ -127,6 +127,7 @@ def train_step(batch, w1, b1, w2, b2, in_dim: int, out_dim: int, lr: float, io_p
     else:
         x, labels_t = batch
         bsz = int(x.shape[0])
+        x.view([bsz, in_dim])
 
     z1, ctx1 = ops.linear_forward(x, w1, b1)
     a1, relu_ctx = ops.relu_forward(z1)
@@ -191,6 +192,7 @@ def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, out_dim: int, max_batches
         else:
             x, labels_t = batch
             bsz = int(x.shape[0])
+            x.view([bsz, in_dim])
 
         z1, _ = ops.linear_forward(x, w1, b1)
         a1, _ = ops.relu_forward(z1)
