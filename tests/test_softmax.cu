@@ -64,6 +64,49 @@ float ForwardLossDotDY(const std::vector<float>& x,
     return Dot(y, dY_ref);
 }
 
+float ReferenceMeanCrossEntropy(const std::vector<float>& probs,
+                                const std::vector<int32_t>& labels,
+                                int m,
+                                int n) {
+    if (static_cast<int>(labels.size()) != m) {
+        throw std::invalid_argument("test_softmax.cu: labels size mismatch in CE reference.");
+    }
+    double sum = 0.0;
+    for (int row = 0; row < m; ++row) {
+        const int32_t label = labels[row];
+        if (label < 0 || label >= n) {
+            throw std::invalid_argument("test_softmax.cu: label out of range in CE reference.");
+        }
+        const size_t idx = static_cast<size_t>(row) * n + static_cast<size_t>(label);
+        const double p = std::max(static_cast<double>(probs[idx]), 1e-12);
+        sum += -std::log(p);
+    }
+    return static_cast<float>(sum / static_cast<double>(m));
+}
+
+std::vector<float> ReferenceSoftmaxCrossEntropyGrad(const std::vector<float>& probs,
+                                                    const std::vector<int32_t>& labels,
+                                                    int m,
+                                                    int n) {
+    if (static_cast<int>(labels.size()) != m) {
+        throw std::invalid_argument("test_softmax.cu: labels size mismatch in CE grad reference.");
+    }
+    std::vector<float> dX = probs;
+    const float inv_m = 1.0f / static_cast<float>(m);
+    for (int row = 0; row < m; ++row) {
+        const int32_t label = labels[row];
+        if (label < 0 || label >= n) {
+            throw std::invalid_argument("test_softmax.cu: label out of range in CE grad reference.");
+        }
+        const size_t idx = static_cast<size_t>(row) * n + static_cast<size_t>(label);
+        dX[idx] -= 1.0f;
+    }
+    for (float& v : dX) {
+        v *= inv_m;
+    }
+    return dX;
+}
+
 TEST(SoftmaxForward, RejectsNullStream) {
     if (!fa_test::cuda_available()) {
         GTEST_SKIP() << "CUDA runtime unavailable";
@@ -343,6 +386,72 @@ TEST(SoftmaxForward, SweepAllCases) {
         }
         ADD_FAILURE() << all.str();
     }
+}
+
+TEST(SoftmaxCrossEntropy, ForwardMatchesReferenceOddShape) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    constexpr int m = 13;
+    constexpr int n = 37;
+    constexpr float abs_tol = 3e-5f;
+    constexpr float rel_tol = 3e-5f;
+    const uint32_t seed = fa_test::MixSeed(fa_test::kSoftmaxSeedBase, m, n, 301, 0);
+
+    const std::vector<float> x = fa_test::SampleUniformVector(static_cast<size_t>(m) * n, -1.0f, 1.0f, seed);
+    std::vector<int32_t> labels(static_cast<size_t>(m), 0);
+    for (int i = 0; i < m; ++i) {
+        labels[static_cast<size_t>(i)] = static_cast<int32_t>((seed + static_cast<uint32_t>(i * 17)) % static_cast<uint32_t>(n));
+    }
+
+    Stream stream;
+    Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
+    Tensor labels_h({m}, DType::I32, Device::CPU);
+    labels_h.copy_from(labels);
+    Tensor labels_d = labels_h.clone(Device::CUDA, stream);
+
+    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(x_d, labels_d, &stream);
+    const float loss = out.loss.clone(Device::CPU).to_vector<float>()[0];
+    stream.synchronize();
+
+    const std::vector<float> probs_ref = fa_test::reference_softmax_forward(x, m, n);
+    const float loss_ref = ReferenceMeanCrossEntropy(probs_ref, labels, m, n);
+    const float tol = abs_tol + rel_tol * std::fabs(loss_ref);
+    EXPECT_NEAR(loss, loss_ref, tol);
+}
+
+TEST(SoftmaxCrossEntropy, BackwardMatchesReferenceOddShape) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA runtime unavailable";
+    }
+
+    constexpr int m = 13;
+    constexpr int n = 37;
+    constexpr float abs_tol = 3e-5f;
+    constexpr float rel_tol = 3e-5f;
+    const uint32_t seed = fa_test::MixSeed(fa_test::kSoftmaxSeedBase, m, n, 401, 0);
+
+    const std::vector<float> x = fa_test::SampleUniformVector(static_cast<size_t>(m) * n, -1.0f, 1.0f, seed);
+    std::vector<int32_t> labels(static_cast<size_t>(m), 0);
+    for (int i = 0; i < m; ++i) {
+        labels[static_cast<size_t>(i)] = static_cast<int32_t>((seed + static_cast<uint32_t>(i * 19)) % static_cast<uint32_t>(n));
+    }
+
+    Stream stream;
+    Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
+    Tensor labels_h({m}, DType::I32, Device::CPU);
+    labels_h.copy_from(labels);
+    Tensor labels_d = labels_h.clone(Device::CUDA, stream);
+
+    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(x_d, labels_d, &stream);
+    SoftmaxCrossEntropyGrads grads = softmax_cross_entropy_backward(out.ctx, &stream);
+    std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
+    stream.synchronize();
+
+    const std::vector<float> probs_ref = fa_test::reference_softmax_forward(x, m, n);
+    const std::vector<float> dX_ref = ReferenceSoftmaxCrossEntropyGrad(probs_ref, labels, m, n);
+    ExpectVectorNear(dX, dX_ref, abs_tol, rel_tol, ReproTag("softmax_ce_backward_odd", seed, m, n));
 }
 
 TEST(SoftmaxBackward, SweepAllCases) {

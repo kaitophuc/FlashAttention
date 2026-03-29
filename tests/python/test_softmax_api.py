@@ -47,6 +47,48 @@ class SoftmaxApiTest(unittest.TestCase):
         dx = ops.softmax_backward(dy, y)
         self.assertEqual(dx.shape, [2, 3])
 
+    def test_softmax_cross_entropy_forward_backward(self):
+        if not cuda_available():
+            self.skipTest("CUDA unavailable")
+
+        logits = ktorch.Tensor([2, 3], dtype=ktorch.DType.F32, device=ktorch.Device.CUDA)
+        logits.copy_from_list_float([2.0, 1.0, 0.0, -1.0, 0.5, 3.0])
+
+        labels = ktorch.Tensor([2], dtype=ktorch.DType.I32, device=ktorch.Device.CUDA)
+        labels.copy_from_list_int32([0, 2])
+
+        loss, ctx = ops.softmax_cross_entropy_forward(logits, labels)
+        self.assertEqual(loss.shape, [1])
+        self.assertEqual(ctx.m, 2)
+        self.assertEqual(ctx.n, 3)
+
+        # Mean CE must be positive finite for this input.
+        loss_val = loss.to_list_float()[0]
+        self.assertTrue(math.isfinite(loss_val))
+        self.assertGreater(loss_val, 0.0)
+
+        dx = ops.softmax_cross_entropy_backward(ctx)
+        self.assertEqual(dx.shape, [2, 3])
+
+        # Reference: dX = (softmax(logits) - onehot(labels)) / batch.
+        row0 = [2.0, 1.0, 0.0]
+        m0 = max(row0)
+        e0 = [math.exp(v - m0) for v in row0]
+        s0 = sum(e0)
+        p0 = [v / s0 for v in e0]
+
+        row1 = [-1.0, 0.5, 3.0]
+        m1 = max(row1)
+        e1 = [math.exp(v - m1) for v in row1]
+        s1 = sum(e1)
+        p1 = [v / s1 for v in e1]
+
+        expected = [
+            (p0[0] - 1.0) / 2.0, p0[1] / 2.0, p0[2] / 2.0,
+            p1[0] / 2.0, p1[1] / 2.0, (p1[2] - 1.0) / 2.0,
+        ]
+        assert_allclose(dx.to_list_float(), expected, atol=2e-5, rtol=2e-5)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ LinearGrads = _C.LinearGrads
 LayerNormContext = _C.LayerNormContext
 LayerNormGrads = _C.LayerNormGrads
 ReluContext = _C.ReluContext
+SoftmaxCrossEntropyContext = _C.SoftmaxCrossEntropyContext
 
 
 def linear_forward(x, w, b=None):
@@ -40,3 +41,11 @@ def softmax_forward(x):
 
 def softmax_backward(dy, y):
     return _C.softmax_backward(dy, y)
+
+
+def softmax_cross_entropy_forward(logits, labels):
+    return _C.softmax_cross_entropy_forward(logits, labels)
+
+
+def softmax_cross_entropy_backward(ctx):
+    return _C.softmax_cross_entropy_backward(ctx)

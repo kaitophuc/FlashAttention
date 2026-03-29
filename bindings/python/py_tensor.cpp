@@ -24,6 +24,7 @@ void bind_tensor(py::module_& m) {
             }
         })
         .def("copy_from_list_float", &tensor_copy_from_list_float, py::arg("values"))
+        .def("copy_from_list_int32", &tensor_copy_from_list_int32, py::arg("values"))
         .def("to_list_float", &tensor_to_list_float)
         .def_static("empty", &tensor_empty, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA)
         .def_static("zeros", &tensor_zeros, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA);
@@ -31,4 +32,3 @@ void bind_tensor(py::module_& m) {
     m.def("empty", &tensor_empty, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA);
     m.def("zeros", &tensor_zeros, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA);
 }
-

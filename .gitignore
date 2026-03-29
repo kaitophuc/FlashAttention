@@ -8,3 +8,8 @@
 *.csv
 *.png
 /data
+*.nsys-rep
+*.log
+*.pt
+*.pth
+*.sqlite

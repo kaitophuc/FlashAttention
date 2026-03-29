@@ -40,6 +40,17 @@ struct ReluContextPy {
     std::shared_ptr<Tensor> x;
 };
 
+struct SoftmaxCrossEntropyContextPy {
+    SoftmaxCrossEntropyCtx ctx;
+    std::shared_ptr<Tensor> labels;
+
+    SoftmaxCrossEntropyContextPy(SoftmaxCrossEntropyCtx&& ctx_in,
+                                 std::shared_ptr<Tensor> labels_in)
+        : ctx(std::move(ctx_in)), labels(std::move(labels_in)) {
+        ctx.labels = labels.get();
+    }
+};
+
 struct LinearGradsPy {
     std::shared_ptr<Tensor> dX;
     std::shared_ptr<Tensor> dW;
@@ -117,6 +128,16 @@ inline void tensor_copy_from_list_float(Tensor& dst, const std::vector<float>& v
     }
 }
 
+inline void tensor_copy_from_list_int32(Tensor& dst, const std::vector<int32_t>& values) {
+    if (dst.dtype_ != DType::I32) {
+        throw std::invalid_argument("ktorch: copy_from_list_int32 only supports I32 tensors.");
+    }
+    dst.copy_from(values);
+    if (dst.device_ == Device::CUDA) {
+        py_default_stream().synchronize();
+    }
+}
+
 inline std::vector<float> tensor_to_list_float(const Tensor& src) {
     if (src.dtype_ != DType::F32) {
         throw std::invalid_argument("ktorch: to_list_float only supports F32 tensors.");
@@ -130,3 +151,4 @@ void bind_linear(py::module_& m);
 void bind_layernorm(py::module_& m);
 void bind_relu(py::module_& m);
 void bind_softmax(py::module_& m);
+void bind_softmax_cross_entropy(py::module_& m);

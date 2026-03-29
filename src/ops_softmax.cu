@@ -149,3 +149,171 @@ SoftmaxGrads softmax_backward(const Tensor& dY, const Tensor& Y, Stream* stream)
 
     return SoftmaxGrads{std::move(dX)};
 }
+
+template <int BLOCK_SIZE>
+__global__ void softmax_cross_entropy_forward_kernel(
+    const float* __restrict__ logits,
+    const int32_t* __restrict__ labels,
+    float* __restrict__ probs,
+    float* __restrict__ loss,
+    int64_t m,
+    int64_t n) {
+    const int row = blockIdx.x;
+    if (row >= m) return;
+
+    const int64_t row_offset = static_cast<int64_t>(row) * n;
+
+    float thread_max = -FLT_MAX;
+    for (int col = threadIdx.x; col < n; col += BLOCK_SIZE) {
+        thread_max = fmaxf(thread_max, logits[row_offset + col]);
+    }
+    const float max_val = blockReduceMax<BLOCK_SIZE>(thread_max);
+
+    float thread_sum = 0.0f;
+    for (int col = threadIdx.x; col < n; col += BLOCK_SIZE) {
+        const float ex = expf(logits[row_offset + col] - max_val);
+        probs[row_offset + col] = ex;
+        thread_sum += ex;
+    }
+    const float sum_val = blockReduceSum<BLOCK_SIZE>(thread_sum);
+    const float inv_sum = 1.0f / sum_val;
+
+    for (int col = threadIdx.x; col < n; col += BLOCK_SIZE) {
+        probs[row_offset + col] *= inv_sum;
+    }
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+        const int label = labels[row];
+        if (label >= 0 && label < n) {
+            const float p = fmaxf(probs[row_offset + label], 1e-12f);
+            atomicAdd(loss, -logf(p) / static_cast<float>(m));
+        }
+    }
+}
+
+template <int BLOCK_SIZE>
+__global__ void softmax_cross_entropy_backward_kernel(
+    const float* __restrict__ probs,
+    const int32_t* __restrict__ labels,
+    float* __restrict__ dX,
+    int64_t m,
+    int64_t n) {
+    const int64_t idx = static_cast<int64_t>(blockIdx.x) * BLOCK_SIZE + threadIdx.x;
+    const int64_t total = m * n;
+    if (idx >= total) return;
+
+    const int64_t row = idx / n;
+    const int col = static_cast<int>(idx % n);
+    const int label = labels[row];
+
+    float grad = probs[idx];
+    if (label >= 0 && label < n && col == label) {
+        grad -= 1.0f;
+    }
+    dX[idx] = grad / static_cast<float>(m);
+}
+
+SoftmaxCrossEntropyResults softmax_cross_entropy_forward(const Tensor& logits, const Tensor& labels, Stream* stream) {
+    if (stream == nullptr) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: Stream pointer cannot be null.");
+    }
+    if (stream->s != cudaStream_t(0)) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: Only the default stream is supported at this phase.");
+    }
+    if (logits.dtype_ != DType::F32) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: logits must be float32.");
+    }
+    if (labels.dtype_ != DType::I32) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: labels must be int32.");
+    }
+    if (logits.device_ != Device::CUDA || labels.device_ != Device::CUDA) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: Only CUDA tensors are supported.");
+    }
+    if (logits.shape_.size() != 2) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: logits must be a 2D tensor.");
+    }
+    if (labels.shape_.size() != 1) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: labels must be a 1D tensor.");
+    }
+
+    const int64_t m = logits.shape_[0];
+    const int64_t n = logits.shape_[1];
+    if (m <= 0 || n <= 0) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: logits dimensions must be greater than zero.");
+    }
+    if (labels.shape_[0] != m) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: labels length must match logits batch dimension.");
+    }
+
+    Tensor probs = Tensor::empty(logits.shape_, logits.dtype_, logits.device_, *stream);
+    Tensor loss = Tensor::zeros({1}, logits.dtype_, logits.device_, *stream);
+
+    constexpr int BLOCK_SIZE = 256;
+    softmax_cross_entropy_forward_kernel<BLOCK_SIZE><<<m, BLOCK_SIZE, 0, stream->s>>>(
+        static_cast<const float*>(logits.data_),
+        static_cast<const int32_t*>(labels.data_),
+        static_cast<float*>(probs.data_),
+        static_cast<float*>(loss.data_),
+        m,
+        n);
+
+    return SoftmaxCrossEntropyResults{
+        std::move(loss),
+        SoftmaxCrossEntropyCtx{&labels, std::move(probs), m, n}
+    };
+}
+
+SoftmaxCrossEntropyGrads softmax_cross_entropy_backward(const SoftmaxCrossEntropyCtx& ctx, Stream* stream) {
+    if (stream == nullptr) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: Stream pointer cannot be null.");
+    }
+    if (stream->s != cudaStream_t(0)) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: Only the default stream is supported at this phase.");
+    }
+    if (ctx.labels == nullptr) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: ctx.labels cannot be null.");
+    }
+
+    const Tensor& labels = *ctx.labels;
+    const Tensor& probs = ctx.probs;
+
+    if (probs.dtype_ != DType::F32) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: probs must be float32.");
+    }
+    if (labels.dtype_ != DType::I32) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: labels must be int32.");
+    }
+    if (probs.device_ != Device::CUDA || labels.device_ != Device::CUDA) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: Only CUDA tensors are supported.");
+    }
+    if (probs.shape_.size() != 2) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: probs must be a 2D tensor.");
+    }
+    if (labels.shape_.size() != 1) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: labels must be a 1D tensor.");
+    }
+    if (ctx.m <= 0 || ctx.n <= 0) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: invalid context dimensions.");
+    }
+    if (probs.shape_[0] != ctx.m || probs.shape_[1] != ctx.n) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: probs shape must match context dimensions.");
+    }
+    if (labels.shape_[0] != ctx.m) {
+        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: labels length must match context batch dimension.");
+    }
+
+    Tensor dX = Tensor::empty(probs.shape_, probs.dtype_, probs.device_, *stream);
+
+    constexpr int BLOCK_SIZE = 256;
+    const int64_t total = ctx.m * ctx.n;
+    const int grid = static_cast<int>((total + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    softmax_cross_entropy_backward_kernel<BLOCK_SIZE><<<grid, BLOCK_SIZE, 0, stream->s>>>(
+        static_cast<const float*>(probs.data_),
+        static_cast<const int32_t*>(labels.data_),
+        static_cast<float*>(dX.data_),
+        ctx.m,
+        ctx.n);
+
+    return SoftmaxCrossEntropyGrads{std::move(dX)};
+}

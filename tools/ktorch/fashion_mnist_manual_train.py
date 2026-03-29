@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import math
 import random
 import time
 from typing import List, Sequence, Tuple
@@ -32,6 +31,12 @@ def make_tensor(shape: Sequence[int], values: Sequence[float]) -> ktorch.Tensor:
     return t
 
 
+def make_labels_tensor(labels: Sequence[int]) -> ktorch.Tensor:
+    t = ktorch.Tensor([len(labels)], dtype=ktorch.DType.I32, device=ktorch.Device.CUDA)
+    t.copy_from_list_int32([int(v) for v in labels])
+    return t
+
+
 def flatten_images_torch_to_list(images) -> List[float]:
     # images: [B, 1, 28, 28] torch tensor
     # Normalize to [0, 1] float and flatten row-major to [B * 784].
@@ -48,57 +53,6 @@ def random_init(rows: int, cols: int, scale: float) -> List[float]:
 
 def zeros(n: int) -> List[float]:
     return [0.0] * n
-
-
-def rowwise_softmax(logits: List[float], batch_size: int, num_classes: int) -> List[float]:
-    probs = [0.0] * (batch_size * num_classes)
-    for i in range(batch_size):
-        base = i * num_classes
-        row = logits[base:base + num_classes]
-        m = max(row)
-        exps = [math.exp(v - m) for v in row]
-        s = sum(exps)
-        for j in range(num_classes):
-            probs[base + j] = exps[j] / s
-    return probs
-
-
-def cross_entropy_and_grad(
-    logits: List[float],
-    labels: Sequence[int],
-    batch_size: int,
-    num_classes: int,
-) -> Tuple[float, List[float], int]:
-    probs = rowwise_softmax(logits, batch_size, num_classes)
-    grad = [0.0] * (batch_size * num_classes)
-
-    eps = 1e-12
-    loss = 0.0
-    correct = 0
-
-    for i in range(batch_size):
-        base = i * num_classes
-        y = int(labels[i])
-        p_y = max(probs[base + y], eps)
-        loss -= math.log(p_y)
-
-        pred = 0
-        best = probs[base]
-        for j in range(1, num_classes):
-            pj = probs[base + j]
-            if pj > best:
-                best = pj
-                pred = j
-        if pred == y:
-            correct += 1
-
-        for j in range(num_classes):
-            g = probs[base + j]
-            if j == y:
-                g -= 1.0
-            grad[base + j] = g / batch_size
-
-    return loss / batch_size, grad, correct
 
 
 def sgd_update(param: ktorch.Tensor, grad: ktorch.Tensor, lr: float) -> None:
@@ -125,9 +79,25 @@ def evaluate(test_loader, w1, b1, w2, b2, max_batches: int) -> Tuple[float, floa
         z1, _ = ops.linear_forward(x, w1, b1)
         a1, _ = ops.relu_forward(z1)
         z2, _ = ops.linear_forward(a1, w2, b2)
+        labels_list = labels.tolist()
+        labels_t = make_labels_tensor(labels_list)
+
+        loss_t, _ = ops.softmax_cross_entropy_forward(z2, labels_t)
+        loss = loss_t.to_list_float()[0]
 
         logits = z2.to_list_float()
-        loss, _, correct = cross_entropy_and_grad(logits, labels.tolist(), bsz, 10)
+        correct = 0
+        for i in range(bsz):
+            base = i * 10
+            pred = 0
+            best = logits[base]
+            for j in range(1, 10):
+                v = logits[base + j]
+                if v > best:
+                    best = v
+                    pred = j
+            if pred == labels_list[i]:
+                correct += 1
 
         total_loss += loss * bsz
         total_correct += correct
@@ -178,17 +148,17 @@ def main() -> None:
             x_rows = flatten_images_torch_to_list(images)
             bsz = len(x_rows)
             x_flat = [v for row in x_rows for v in row]
-            y = labels.tolist()
+            labels_list = labels.tolist()
 
             x = make_tensor([bsz, in_dim], x_flat)
+            labels_t = make_labels_tensor(labels_list)
 
             z1, ctx1 = ops.linear_forward(x, w1, b1)
             a1, relu_ctx = ops.relu_forward(z1)
             z2, ctx2 = ops.linear_forward(a1, w2, b2)
 
-            logits = z2.to_list_float()
-            loss, dz2_vals, correct = cross_entropy_and_grad(logits, y, bsz, out_dim)
-            dz2 = make_tensor([bsz, out_dim], dz2_vals)
+            loss_t, ce_ctx = ops.softmax_cross_entropy_forward(z2, labels_t)
+            dz2 = ops.softmax_cross_entropy_backward(ce_ctx)
 
             g2 = ops.linear_backward(dz2, ctx2, True, True, True)
             dz1 = ops.relu_backward(g2.dX, relu_ctx)
@@ -198,6 +168,21 @@ def main() -> None:
             sgd_update(b2, g2.db, args.lr)
             sgd_update(w1, g1.dW, args.lr)
             sgd_update(b1, g1.db, args.lr)
+
+            loss = loss_t.to_list_float()[0]
+            logits = z2.to_list_float()
+            correct = 0
+            for i in range(bsz):
+                base = i * out_dim
+                pred = 0
+                best = logits[base]
+                for j in range(1, out_dim):
+                    v = logits[base + j]
+                    if v > best:
+                        best = v
+                        pred = j
+                if pred == labels_list[i]:
+                    correct += 1
 
             total_loss += loss * bsz
             total_correct += correct

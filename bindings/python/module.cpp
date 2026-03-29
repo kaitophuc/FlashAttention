@@ -9,5 +9,5 @@ PYBIND11_MODULE(_C, m) {
     bind_layernorm(m);
     bind_relu(m);
     bind_softmax(m);
+    bind_softmax_cross_entropy(m);
 }
-

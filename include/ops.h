@@ -90,3 +90,22 @@ struct SoftmaxGrads {
 };
 Tensor softmax_forward(const Tensor& X, Stream* stream);
 SoftmaxGrads softmax_backward(const Tensor& dY, const Tensor& Y, Stream* stream);
+
+struct SoftmaxCrossEntropyCtx {
+    const Tensor* labels;
+    Tensor probs;
+    int64_t m;
+    int64_t n;
+};
+
+struct SoftmaxCrossEntropyResults {
+    Tensor loss;
+    SoftmaxCrossEntropyCtx ctx;
+};
+
+struct SoftmaxCrossEntropyGrads {
+    Tensor dX;
+};
+
+SoftmaxCrossEntropyResults softmax_cross_entropy_forward(const Tensor& logits, const Tensor& labels, Stream* stream);
+SoftmaxCrossEntropyGrads softmax_cross_entropy_backward(const SoftmaxCrossEntropyCtx& ctx, Stream* stream);
