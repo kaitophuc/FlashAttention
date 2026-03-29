@@ -15,6 +15,7 @@
 
 #include "allocator.h"
 #include "cu_check.h"
+#include "cublass_handle.h"
 
 struct Tensor {
     void* data_;
@@ -372,6 +373,9 @@ struct Tensor {
             std::memcpy(data_, src.data(), src.size() * sizeof(T));
         }
     }
+
+    Tensor matmul(const Tensor& other) const;
+    Tensor matmul(const Tensor& other, Stream& stream, CublasHandle& cublas_handle) const;
 
 private:
     void release() noexcept {

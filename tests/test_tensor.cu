@@ -202,5 +202,219 @@ TEST(TensorCorrectness, RejectsCpuDestinationCopyFromWithStreamArgument) {
     EXPECT_THROW((void)dst.copy_from(src, stream), std::invalid_argument);
 }
 
+std::vector<float> ReferenceMatmulF32(const std::vector<float>& a,
+                                      const std::vector<float>& b,
+                                      int64_t m,
+                                      int64_t k,
+                                      int64_t n) {
+    std::vector<float> out(static_cast<size_t>(m * n), 0.0f);
+    for (int64_t i = 0; i < m; ++i) {
+        for (int64_t j = 0; j < n; ++j) {
+            float acc = 0.0f;
+            for (int64_t p = 0; p < k; ++p) {
+                acc += a[static_cast<size_t>(i * k + p)] * b[static_cast<size_t>(p * n + j)];
+            }
+            out[static_cast<size_t>(i * n + j)] = acc;
+        }
+    }
+    return out;
+}
+
+TEST(TensorMatmul, CpuF32MatchesReference) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    constexpr int64_t m = 2;
+    constexpr int64_t k = 3;
+    constexpr int64_t n = 4;
+    const std::vector<float> a = {
+        1.0f, 2.0f, 3.0f,
+        4.0f, 5.0f, 6.0f
+    };
+    const std::vector<float> b = {
+        1.0f, 2.0f, 3.0f, 4.0f,
+        5.0f, 6.0f, 7.0f, 8.0f,
+        9.0f, 1.0f, 2.0f, 3.0f
+    };
+
+    Tensor lhs({m, k}, DType::F32, Device::CPU);
+    Tensor rhs({k, n}, DType::F32, Device::CPU);
+    lhs.copy_from(a);
+    rhs.copy_from(b);
+
+    Tensor out = lhs.matmul(rhs);
+    const std::vector<float> expected = ReferenceMatmulF32(a, b, m, k, n);
+    const std::vector<float> got = out.to_vector<float>();
+
+    ASSERT_EQ(got.size(), expected.size());
+    constexpr float kEps = 1e-6f;
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_NEAR(got[i], expected[i], kEps) << "idx=" << i;
+    }
+}
+
+TEST(TensorMatmul, CpuI32MatchesReference) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Tensor lhs({2, 2}, DType::I32, Device::CPU);
+    Tensor rhs({2, 2}, DType::I32, Device::CPU);
+    lhs.copy_from(std::vector<int32_t>{-1, 2, 3, -4});
+    rhs.copy_from(std::vector<int32_t>{5, -6, 7, 8});
+
+    Tensor out = lhs.matmul(rhs);
+    const std::vector<int32_t> got = out.to_vector<int32_t>();
+    const std::vector<int32_t> expected = {9, 22, -13, -50};
+
+    ASSERT_EQ(got.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(got[i], expected[i]) << "idx=" << i;
+    }
+}
+
+TEST(TensorMatmul, CpuRejectsInvalidInputs) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Tensor a_1d({4}, DType::F32, Device::CPU);
+    Tensor b_2d({4, 2}, DType::F32, Device::CPU);
+    Tensor bad_k({5, 2}, DType::F32, Device::CPU);
+    Tensor i32_rhs({4, 2}, DType::I32, Device::CPU);
+
+    EXPECT_THROW((void)a_1d.matmul(b_2d), std::invalid_argument);
+    EXPECT_THROW((void)b_2d.matmul(bad_k), std::invalid_argument);
+    EXPECT_THROW((void)b_2d.matmul(i32_rhs), std::invalid_argument);
+}
+
+TEST(TensorMatmul, CpuApiRejectsCudaTensorWithoutHandle) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Stream stream(cudaStream_t(0));
+    Tensor lhs({2, 3}, DType::F32, Device::CUDA, stream);
+    Tensor rhs({3, 2}, DType::F32, Device::CUDA, stream);
+    EXPECT_THROW((void)lhs.matmul(rhs), std::invalid_argument);
+}
+
+TEST(TensorMatmul, CudaF32MatchesReference) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    constexpr int64_t m = 3;
+    constexpr int64_t k = 2;
+    constexpr int64_t n = 4;
+    const std::vector<float> a = {
+        1.0f, 2.0f,
+        -3.0f, 4.0f,
+        5.5f, -6.5f
+    };
+    const std::vector<float> b = {
+        7.0f, -8.0f, 9.0f, 1.0f,
+        2.0f, 3.0f, -4.0f, 5.0f
+    };
+
+    Tensor lhs_h({m, k}, DType::F32, Device::CPU);
+    Tensor rhs_h({k, n}, DType::F32, Device::CPU);
+    lhs_h.copy_from(a);
+    rhs_h.copy_from(b);
+
+    Stream stream(cudaStream_t(0));
+    CublasHandle handle;
+    Tensor lhs_d = lhs_h.clone(Device::CUDA, stream);
+    Tensor rhs_d = rhs_h.clone(Device::CUDA, stream);
+
+    Tensor out_d = lhs_d.matmul(rhs_d, stream, handle);
+    Tensor out_h = out_d.clone(Device::CPU);
+    const std::vector<float> got = out_h.to_vector<float>();
+    const std::vector<float> expected = ReferenceMatmulF32(a, b, m, k, n);
+
+    ASSERT_EQ(got.size(), expected.size());
+    constexpr float kEps = 1e-5f;
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_NEAR(got[i], expected[i], kEps) << "idx=" << i;
+    }
+}
+
+TEST(TensorMatmul, CudaF16MatchesReferenceForEdgeShape) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    // Edge shape: 1xK times Kx1.
+    constexpr int64_t m = 1;
+    constexpr int64_t k = 5;
+    constexpr int64_t n = 1;
+    const std::vector<float> a_f32 = {1.0f, -2.0f, 3.0f, -4.0f, 0.5f};
+    const std::vector<float> b_f32 = {-0.25f, 0.5f, -1.0f, 2.0f, 4.0f};
+
+    std::vector<__half> a_f16(a_f32.size());
+    std::vector<__half> b_f16(b_f32.size());
+    for (size_t i = 0; i < a_f32.size(); ++i) {
+        a_f16[i] = __float2half(a_f32[i]);
+    }
+    for (size_t i = 0; i < b_f32.size(); ++i) {
+        b_f16[i] = __float2half(b_f32[i]);
+    }
+
+    Tensor lhs_h({m, k}, DType::F16, Device::CPU);
+    Tensor rhs_h({k, n}, DType::F16, Device::CPU);
+    lhs_h.copy_from(a_f16);
+    rhs_h.copy_from(b_f16);
+
+    Stream stream(cudaStream_t(0));
+    CublasHandle handle;
+    Tensor lhs_d = lhs_h.clone(Device::CUDA, stream);
+    Tensor rhs_d = rhs_h.clone(Device::CUDA, stream);
+
+    Tensor out_d = lhs_d.matmul(rhs_d, stream, handle);
+    Tensor out_h = out_d.clone(Device::CPU);
+    const std::vector<__half> got_h = out_h.to_vector<__half>();
+    ASSERT_EQ(got_h.size(), static_cast<size_t>(m * n));
+
+    const std::vector<float> expected = ReferenceMatmulF32(a_f32, b_f32, m, k, n);
+    constexpr float kEps = 2e-2f;
+    EXPECT_NEAR(__half2float(got_h[0]), expected[0], kEps);
+}
+
+TEST(TensorMatmul, CudaRejectsInvalidInputs) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Stream stream(cudaStream_t(0));
+    CublasHandle handle;
+
+    Tensor lhs({2, 3}, DType::F32, Device::CUDA, stream);
+    Tensor rhs_bad_k({4, 2}, DType::F32, Device::CUDA, stream);
+    Tensor rhs_i32({3, 2}, DType::I32, Device::CUDA, stream);
+    Tensor rhs_cpu({3, 2}, DType::F32, Device::CPU);
+    Tensor lhs_1d({6}, DType::F32, Device::CUDA, stream);
+
+    EXPECT_THROW((void)lhs.matmul(rhs_bad_k, stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)lhs.matmul(rhs_i32, stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)lhs.matmul(rhs_cpu, stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)lhs_1d.matmul(lhs, stream, handle), std::invalid_argument);
+}
+
+TEST(TensorMatmul, CudaRejectsNonDefaultStream) {
+    if (!fa_test::cuda_available()) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+
+    Stream stream(cudaStream_t(0));
+    CublasHandle handle;
+    Tensor lhs({2, 2}, DType::F32, Device::CUDA, stream);
+    Tensor rhs({2, 2}, DType::F32, Device::CUDA, stream);
+
+    Stream fake_stream(cudaStream_t(0));
+    fake_stream.s = reinterpret_cast<cudaStream_t>(1);
+    EXPECT_THROW((void)lhs.matmul(rhs, fake_stream, handle), std::invalid_argument);
+}
+
 
 }  // namespace
