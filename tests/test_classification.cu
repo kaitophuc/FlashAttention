@@ -54,7 +54,7 @@ TEST(ClassificationCorrectCount, MatchesReferenceSmallKnownCase) {
     logits.copy_from(logits_h, stream);
     labels.copy_from(labels_h, stream);
 
-    Tensor correct_d = classification_correct_count(logits, labels, &stream);
+    Tensor correct_d = classification_correct_count(logits, labels, stream);
     const std::vector<int32_t> got = correct_d.to_vector<int32_t>(stream);
     ASSERT_EQ(got.size(), 1u);
     EXPECT_EQ(got[0], 3);
@@ -92,7 +92,7 @@ TEST(ClassificationCorrectCount, MatchesReferenceLargerAndTieBehavior) {
     labels.copy_from(labels_h, stream);
 
     const int32_t expected = ReferenceCorrectCount(logits_h, labels_h, m, n);
-    Tensor correct_d = classification_correct_count(logits, labels, &stream);
+    Tensor correct_d = classification_correct_count(logits, labels, stream);
     const std::vector<int32_t> got = correct_d.to_vector<int32_t>(stream);
     ASSERT_EQ(got.size(), 1u);
     EXPECT_EQ(got[0], expected);
@@ -114,21 +114,21 @@ TEST(ClassificationCorrectCount, RejectsInvalidInputs) {
     Tensor logits_cpu({2, 3}, DType::F32, Device::CPU);
     Tensor labels_cpu({2}, DType::I32, Device::CPU);
 
-    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_i32, nullptr), std::invalid_argument);
-    EXPECT_THROW((void)classification_correct_count(logits_i32, labels_i32, &stream), std::invalid_argument);
-    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_f32, &stream), std::invalid_argument);
-    EXPECT_THROW((void)classification_correct_count(logits_3d, labels_i32, &stream), std::invalid_argument);
-    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_bad_shape, &stream), std::invalid_argument);
-    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_bad_len, &stream), std::invalid_argument);
-    EXPECT_THROW((void)classification_correct_count(logits_cpu, labels_i32, &stream), std::invalid_argument);
-    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_cpu, &stream), std::invalid_argument);
+    EXPECT_NO_THROW((void)classification_correct_count(logits_f32, labels_i32));
+    EXPECT_THROW((void)classification_correct_count(logits_i32, labels_i32, stream), std::invalid_argument);
+    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_f32, stream), std::invalid_argument);
+    EXPECT_THROW((void)classification_correct_count(logits_3d, labels_i32, stream), std::invalid_argument);
+    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_bad_shape, stream), std::invalid_argument);
+    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_bad_len, stream), std::invalid_argument);
+    EXPECT_THROW((void)classification_correct_count(logits_cpu, labels_i32, stream), std::invalid_argument);
+    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_cpu, stream), std::invalid_argument);
 
     cudaStream_t raw_non_default = nullptr;
     CUDA_CHECK(cudaStreamCreateWithFlags(&raw_non_default, cudaStreamNonBlocking));
     Stream non_default_stream;
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
-    EXPECT_NO_THROW((void)classification_correct_count(logits_f32, labels_i32, &non_default_stream));
+    EXPECT_NO_THROW((void)classification_correct_count(logits_f32, labels_i32, non_default_stream));
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
 

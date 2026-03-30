@@ -8,7 +8,7 @@ std::pair<std::shared_ptr<Tensor>, ReluContextPy> relu_forward_py(const std::sha
     }
 
     Stream stream = py_current_stream();
-    ReluResults out = relu_forward(*x, &stream);
+    ReluResults out = relu_forward(*x, stream);
 
     ReluContextPy ctx;
     ctx.ctx = out.ctx;
@@ -24,7 +24,7 @@ std::shared_ptr<Tensor> relu_backward_py(const std::shared_ptr<Tensor>& dY, cons
     }
 
     Stream stream = py_current_stream();
-    ReluGrads grads = relu_backward(*dY, ctx.ctx, &stream);
+    ReluGrads grads = relu_backward(*dY, ctx.ctx, stream);
     return make_tensor_shared(std::move(grads.dX));
 }
 

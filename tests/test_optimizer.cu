@@ -34,7 +34,7 @@ TEST(OptimizerSgdUpdate, UpdatesInPlaceSmallTensor) {
     param.copy_from(p0, stream);
     grad.copy_from(g0, stream);
 
-    sgd_update_(param, grad, 0.5f, &stream);
+    sgd_update_(param, grad, 0.5f, stream);
     const std::vector<float> got = param.to_vector<float>(stream);
 
     ASSERT_EQ(got.size(), p0.size());
@@ -58,7 +58,7 @@ TEST(OptimizerSgdUpdate, UpdatesInPlaceGridStrideCoverage) {
     param.copy_from(p0, stream);
     grad.copy_from(g0, stream);
 
-    sgd_update_(param, grad, 0.03f, &stream);
+    sgd_update_(param, grad, 0.03f, stream);
     const std::vector<float> got = param.to_vector<float>(stream);
 
     ASSERT_EQ(got.size(), p0.size());
@@ -79,12 +79,12 @@ TEST(OptimizerSgdUpdate, RejectsInvalidInputs) {
     Tensor g_cpu({4}, DType::F32, Device::CPU);
     Tensor g_bad_shape({5}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)sgd_update_(p_f32, g_f32, 0.1f, nullptr), std::invalid_argument);
-    EXPECT_THROW((void)sgd_update_(p_f32, g_bad_shape, 0.1f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)sgd_update_(p_f32, g_f16, 0.1f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)sgd_update_(p_f32, g_cpu, 0.1f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)sgd_update_(p_f32, g_f32, std::numeric_limits<float>::quiet_NaN(), &stream), std::invalid_argument);
-    EXPECT_THROW((void)sgd_update_(p_f32, g_f32, std::numeric_limits<float>::infinity(), &stream), std::invalid_argument);
+    EXPECT_NO_THROW((void)sgd_update_(p_f32, g_f32, 0.1f));
+    EXPECT_THROW((void)sgd_update_(p_f32, g_bad_shape, 0.1f, stream), std::invalid_argument);
+    EXPECT_THROW((void)sgd_update_(p_f32, g_f16, 0.1f, stream), std::invalid_argument);
+    EXPECT_THROW((void)sgd_update_(p_f32, g_cpu, 0.1f, stream), std::invalid_argument);
+    EXPECT_THROW((void)sgd_update_(p_f32, g_f32, std::numeric_limits<float>::quiet_NaN(), stream), std::invalid_argument);
+    EXPECT_THROW((void)sgd_update_(p_f32, g_f32, std::numeric_limits<float>::infinity(), stream), std::invalid_argument);
 }
 
 }  // namespace

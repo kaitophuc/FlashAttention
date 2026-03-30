@@ -37,7 +37,7 @@ Tensor MakeCpuTensor2D(int rows, int cols, const std::vector<float>& values) {
 
 std::vector<float> RunForwardToHost(const Tensor& x_h, Stream& stream) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
-    Tensor y_d = softmax_forward(x_d, &stream);
+    Tensor y_d = softmax_forward(x_d, stream);
     Tensor y_h = y_d.clone(Device::CPU);
     stream.synchronize();
     return y_h.to_vector<float>();
@@ -114,7 +114,7 @@ TEST(SoftmaxForward, RejectsNullStream) {
 
     Stream stream;
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
-    EXPECT_THROW((void)softmax_forward(x, nullptr), std::invalid_argument);
+    EXPECT_NO_THROW((void)softmax_forward(x));
 }
 
 TEST(SoftmaxForward, RejectsNonDefaultStream) {
@@ -131,7 +131,7 @@ TEST(SoftmaxForward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_NO_THROW((void)softmax_forward(x, &non_default_stream));
+    EXPECT_NO_THROW((void)softmax_forward(x, non_default_stream));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
@@ -143,7 +143,7 @@ TEST(SoftmaxForward, RejectsNonF32) {
 
     Stream stream;
     Tensor x({4, 7}, DType::F16, Device::CUDA, stream);
-    EXPECT_THROW((void)softmax_forward(x, &stream), std::invalid_argument);
+    EXPECT_THROW((void)softmax_forward(x, stream), std::invalid_argument);
 }
 
 TEST(SoftmaxForward, RejectsNon2DInput) {
@@ -153,7 +153,7 @@ TEST(SoftmaxForward, RejectsNon2DInput) {
 
     Stream stream;
     Tensor x({4, 7, 2}, DType::F32, Device::CUDA, stream);
-    EXPECT_THROW((void)softmax_forward(x, &stream), std::invalid_argument);
+    EXPECT_THROW((void)softmax_forward(x, stream), std::invalid_argument);
 }
 
 TEST(SoftmaxForward, TensorRejectsNonPositiveDimsBeforeCall) {
@@ -175,7 +175,7 @@ TEST(SoftmaxBackward, RejectsNullStream) {
     Tensor y({4, 7}, DType::F32, Device::CUDA, stream);
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)softmax_backward(dY, y, nullptr), std::invalid_argument);
+    EXPECT_NO_THROW((void)softmax_backward(dY, y));
 }
 
 TEST(SoftmaxBackward, RejectsNonDefaultStream) {
@@ -193,7 +193,7 @@ TEST(SoftmaxBackward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_NO_THROW((void)softmax_backward(dY, y, &non_default_stream));
+    EXPECT_NO_THROW((void)softmax_backward(dY, y, non_default_stream));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
@@ -207,7 +207,7 @@ TEST(SoftmaxBackward, RejectsNonF32DY) {
     Tensor y({4, 7}, DType::F32, Device::CUDA, stream);
     Tensor dY({4, 7}, DType::F16, Device::CUDA, stream);
 
-    EXPECT_THROW((void)softmax_backward(dY, y, &stream), std::invalid_argument);
+    EXPECT_THROW((void)softmax_backward(dY, y, stream), std::invalid_argument);
 }
 
 TEST(SoftmaxBackward, RejectsNonF32Y) {
@@ -219,7 +219,7 @@ TEST(SoftmaxBackward, RejectsNonF32Y) {
     Tensor y({4, 7}, DType::F16, Device::CUDA, stream);
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)softmax_backward(dY, y, &stream), std::invalid_argument);
+    EXPECT_THROW((void)softmax_backward(dY, y, stream), std::invalid_argument);
 }
 
 TEST(SoftmaxBackward, RejectsDeviceMismatchYDY) {
@@ -231,7 +231,7 @@ TEST(SoftmaxBackward, RejectsDeviceMismatchYDY) {
     Tensor y_cuda({4, 7}, DType::F32, Device::CUDA, stream);
     Tensor dY_cpu({4, 7}, DType::F32, Device::CPU);
 
-    EXPECT_THROW((void)softmax_backward(dY_cpu, y_cuda, &stream), std::invalid_argument);
+    EXPECT_THROW((void)softmax_backward(dY_cpu, y_cuda, stream), std::invalid_argument);
 }
 
 TEST(SoftmaxBackward, RejectsShapeMismatch) {
@@ -243,7 +243,7 @@ TEST(SoftmaxBackward, RejectsShapeMismatch) {
     Tensor y({4, 7}, DType::F32, Device::CUDA, stream);
     Tensor dY({7, 4}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)softmax_backward(dY, y, &stream), std::invalid_argument);
+    EXPECT_THROW((void)softmax_backward(dY, y, stream), std::invalid_argument);
 }
 
 TEST(SoftmaxBackward, RejectsNon2DY) {
@@ -255,7 +255,7 @@ TEST(SoftmaxBackward, RejectsNon2DY) {
     Tensor y({4, 7, 2}, DType::F32, Device::CUDA, stream);
     Tensor dY({4, 7, 2}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)softmax_backward(dY, y, &stream), std::invalid_argument);
+    EXPECT_THROW((void)softmax_backward(dY, y, stream), std::invalid_argument);
 }
 
 TEST(SoftmaxBackward, TensorRejectsNonPositiveDimsBeforeCall) {
@@ -284,7 +284,7 @@ TEST(SoftmaxForward, MatchesReferenceOddShape) {
     Stream stream;
     Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
 
-    Tensor y_d = softmax_forward(x_d, &stream);
+    Tensor y_d = softmax_forward(x_d, stream);
     std::vector<float> y = y_d.clone(Device::CPU).to_vector<float>();
     stream.synchronize();
 
@@ -310,8 +310,8 @@ TEST(SoftmaxBackward, MatchesReferenceOddShape) {
     Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY).clone(Device::CUDA, stream);
 
-    Tensor y_d = softmax_forward(x_d, &stream);
-    SoftmaxGrads grads = softmax_backward(dY_d, y_d, &stream);
+    Tensor y_d = softmax_forward(x_d, stream);
+    SoftmaxGrads grads = softmax_backward(dY_d, y_d, stream);
 
     std::vector<float> y = y_d.clone(Device::CPU).to_vector<float>();
     std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
@@ -339,7 +339,7 @@ TEST(SoftmaxForward, SweepAllCases) {
 
             Stream stream;
             Tensor x_d = MakeCpuTensor2D(c.m, c.n, x).clone(Device::CUDA, stream);
-            Tensor y_d = softmax_forward(x_d, &stream);
+            Tensor y_d = softmax_forward(x_d, stream);
             std::vector<float> y = y_d.clone(Device::CPU).to_vector<float>();
             stream.synchronize();
 
@@ -411,7 +411,7 @@ TEST(SoftmaxCrossEntropy, ForwardMatchesReferenceOddShape) {
     labels_h.copy_from(labels);
     Tensor labels_d = labels_h.clone(Device::CUDA, stream);
 
-    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(x_d, labels_d, &stream);
+    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(x_d, labels_d, stream);
     const float loss = out.loss.clone(Device::CPU).to_vector<float>()[0];
     stream.synchronize();
 
@@ -444,8 +444,8 @@ TEST(SoftmaxCrossEntropy, BackwardMatchesReferenceOddShape) {
     labels_h.copy_from(labels);
     Tensor labels_d = labels_h.clone(Device::CUDA, stream);
 
-    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(x_d, labels_d, &stream);
-    SoftmaxCrossEntropyGrads grads = softmax_cross_entropy_backward(out.ctx, &stream);
+    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(x_d, labels_d, stream);
+    SoftmaxCrossEntropyGrads grads = softmax_cross_entropy_backward(out.ctx, stream);
     std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
     stream.synchronize();
 
@@ -472,8 +472,8 @@ TEST(SoftmaxBackward, SweepAllCases) {
             Tensor x_d = MakeCpuTensor2D(c.m, c.n, x).clone(Device::CUDA, stream);
             Tensor dY_d = MakeCpuTensor2D(c.m, c.n, dY).clone(Device::CUDA, stream);
 
-            Tensor y_d = softmax_forward(x_d, &stream);
-            SoftmaxGrads grads = softmax_backward(dY_d, y_d, &stream);
+            Tensor y_d = softmax_forward(x_d, stream);
+            SoftmaxGrads grads = softmax_backward(dY_d, y_d, stream);
 
             std::vector<float> y = y_d.clone(Device::CPU).to_vector<float>();
             std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
@@ -538,7 +538,7 @@ TEST(SoftmaxForward, NumericEdgePatternsAndShapes) {
     for (const auto& c : cases) {
         Stream stream;
         Tensor x_d = MakeCpuTensor2D(c.m, c.n, c.x).clone(Device::CUDA, stream);
-        Tensor y_d = softmax_forward(x_d, &stream);
+        Tensor y_d = softmax_forward(x_d, stream);
 
         const std::vector<float> got = y_d.clone(Device::CPU).to_vector<float>();
         stream.synchronize();
@@ -561,7 +561,7 @@ TEST(SoftmaxForward, InvariantRowSumsToOneAndRange) {
 
     Stream stream;
     Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
-    Tensor y_d = softmax_forward(x_d, &stream);
+    Tensor y_d = softmax_forward(x_d, stream);
     std::vector<float> y = y_d.clone(Device::CPU).to_vector<float>();
     stream.synchronize();
 
@@ -620,8 +620,8 @@ TEST(SoftmaxForward, InvariantDeterministicForSameInput) {
 
     Stream stream;
     Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
-    Tensor y1_d = softmax_forward(x_d, &stream);
-    Tensor y2_d = softmax_forward(x_d, &stream);
+    Tensor y1_d = softmax_forward(x_d, stream);
+    Tensor y2_d = softmax_forward(x_d, stream);
 
     const std::vector<float> y1 = y1_d.clone(Device::CPU).to_vector<float>();
     const std::vector<float> y2 = y2_d.clone(Device::CPU).to_vector<float>();
@@ -652,8 +652,8 @@ TEST(SoftmaxBackward, FiniteDifferenceGradientCheckSmall) {
         Stream stream;
         Tensor x_d = MakeCpuTensor2D(s.m, s.n, x).clone(Device::CUDA, stream);
         Tensor dY_d = MakeCpuTensor2D(s.m, s.n, dY_ref).clone(Device::CUDA, stream);
-        Tensor y_d = softmax_forward(x_d, &stream);
-        SoftmaxGrads grads = softmax_backward(dY_d, y_d, &stream);
+        Tensor y_d = softmax_forward(x_d, stream);
+        SoftmaxGrads grads = softmax_backward(dY_d, y_d, stream);
         const std::vector<float> dX_analytic = grads.dX.clone(Device::CPU).to_vector<float>();
         stream.synchronize();
 
@@ -690,8 +690,8 @@ TEST(SoftmaxBackward, InvariantRowSumOfDXIsZero) {
     Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY).clone(Device::CUDA, stream);
 
-    Tensor y_d = softmax_forward(x_d, &stream);
-    SoftmaxGrads grads = softmax_backward(dY_d, y_d, &stream);
+    Tensor y_d = softmax_forward(x_d, stream);
+    SoftmaxGrads grads = softmax_backward(dY_d, y_d, stream);
     std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
     stream.synchronize();
 
@@ -720,8 +720,8 @@ TEST(SoftmaxBackward, InvariantZeroDYGivesZeroDX) {
     Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY_zero).clone(Device::CUDA, stream);
 
-    Tensor y_d = softmax_forward(x_d, &stream);
-    SoftmaxGrads grads = softmax_backward(dY_d, y_d, &stream);
+    Tensor y_d = softmax_forward(x_d, stream);
+    SoftmaxGrads grads = softmax_backward(dY_d, y_d, stream);
     std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
     stream.synchronize();
 
@@ -752,11 +752,11 @@ TEST(SoftmaxBackward, InvariantLinearityInDYForFixedY) {
 
     Stream stream;
     Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
-    Tensor y_d = softmax_forward(x_d, &stream);
+    Tensor y_d = softmax_forward(x_d, stream);
 
-    SoftmaxGrads g1 = softmax_backward(MakeCpuTensor2D(m, n, dY1).clone(Device::CUDA, stream), y_d, &stream);
-    SoftmaxGrads g2 = softmax_backward(MakeCpuTensor2D(m, n, dY2).clone(Device::CUDA, stream), y_d, &stream);
-    SoftmaxGrads gc = softmax_backward(MakeCpuTensor2D(m, n, dYc).clone(Device::CUDA, stream), y_d, &stream);
+    SoftmaxGrads g1 = softmax_backward(MakeCpuTensor2D(m, n, dY1).clone(Device::CUDA, stream), y_d, stream);
+    SoftmaxGrads g2 = softmax_backward(MakeCpuTensor2D(m, n, dY2).clone(Device::CUDA, stream), y_d, stream);
+    SoftmaxGrads gc = softmax_backward(MakeCpuTensor2D(m, n, dYc).clone(Device::CUDA, stream), y_d, stream);
 
     const std::vector<float> dX1 = g1.dX.clone(Device::CPU).to_vector<float>();
     const std::vector<float> dX2 = g2.dX.clone(Device::CPU).to_vector<float>();
@@ -789,9 +789,9 @@ TEST(SoftmaxBackward, InvariantDeterministicForSameYAndDY) {
     Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY).clone(Device::CUDA, stream);
 
-    Tensor y_d = softmax_forward(x_d, &stream);
-    SoftmaxGrads g1 = softmax_backward(dY_d, y_d, &stream);
-    SoftmaxGrads g2 = softmax_backward(dY_d, y_d, &stream);
+    Tensor y_d = softmax_forward(x_d, stream);
+    SoftmaxGrads g1 = softmax_backward(dY_d, y_d, stream);
+    SoftmaxGrads g2 = softmax_backward(dY_d, y_d, stream);
 
     const std::vector<float> dX1 = g1.dX.clone(Device::CPU).to_vector<float>();
     const std::vector<float> dX2 = g2.dX.clone(Device::CPU).to_vector<float>();
@@ -818,8 +818,8 @@ TEST(SoftmaxForwardBackward, TwoStageReuseNoMidTransfer) {
     Tensor x_d = MakeCpuTensor2D(m, n, x).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY).clone(Device::CUDA, stream);
 
-    Tensor y_d = softmax_forward(x_d, &stream);
-    SoftmaxGrads grads = softmax_backward(dY_d, y_d, &stream);
+    Tensor y_d = softmax_forward(x_d, stream);
+    SoftmaxGrads grads = softmax_backward(dY_d, y_d, stream);
 
     const std::vector<float> y = y_d.clone(Device::CPU).to_vector<float>();
     const std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
@@ -854,11 +854,11 @@ TEST(SoftmaxForwardBackward, IsolationAcrossMultipleForwardsNoMidTransfer) {
     Tensor dY1_d = MakeCpuTensor2D(m, n, dY1).clone(Device::CUDA, stream);
     Tensor dY2_d = MakeCpuTensor2D(m, n, dY2).clone(Device::CUDA, stream);
 
-    Tensor y1_d = softmax_forward(x1_d, &stream);
-    Tensor y2_d = softmax_forward(x2_d, &stream);
+    Tensor y1_d = softmax_forward(x1_d, stream);
+    Tensor y2_d = softmax_forward(x2_d, stream);
 
-    SoftmaxGrads g2 = softmax_backward(dY2_d, y2_d, &stream);
-    SoftmaxGrads g1 = softmax_backward(dY1_d, y1_d, &stream);
+    SoftmaxGrads g2 = softmax_backward(dY2_d, y2_d, stream);
+    SoftmaxGrads g1 = softmax_backward(dY1_d, y1_d, stream);
 
     const std::vector<float> dX1 = g1.dX.clone(Device::CPU).to_vector<float>();
     const std::vector<float> dX2 = g2.dX.clone(Device::CPU).to_vector<float>();
@@ -891,8 +891,8 @@ TEST(SoftmaxForwardBackward, SweepAllCasesNoMidTransfer) {
             Tensor x_d = MakeCpuTensor2D(c.m, c.n, x).clone(Device::CUDA, stream);
             Tensor dY_d = MakeCpuTensor2D(c.m, c.n, dY).clone(Device::CUDA, stream);
 
-            Tensor y_d = softmax_forward(x_d, &stream);
-            SoftmaxGrads grads = softmax_backward(dY_d, y_d, &stream);
+            Tensor y_d = softmax_forward(x_d, stream);
+            SoftmaxGrads grads = softmax_backward(dY_d, y_d, stream);
 
             const std::vector<float> y = y_d.clone(Device::CPU).to_vector<float>();
             const std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();

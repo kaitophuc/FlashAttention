@@ -186,7 +186,7 @@ void benchmark_linear_forward(benchmark::State& state, const LinearCase* cfg) {
     const int warmup = env_int("FA_LINEAR_WARMUP", 50);
     const Tensor* b_ptr = cfg->bias ? &b : nullptr;
     for (int i = 0; i < warmup; ++i) {
-        (void)linear_forward(x, w, b_ptr, &stream, cublas_handle);
+        (void)linear_forward(x, w, b_ptr, stream, cublas_handle);
     }
     stream.synchronize();
 
@@ -196,7 +196,7 @@ void benchmark_linear_forward(benchmark::State& state, const LinearCase* cfg) {
         Event start;
         Event stop;
         record(start, stream);
-        LinearResults out = linear_forward(x, w, b_ptr, &stream, cublas_handle);
+        LinearResults out = linear_forward(x, w, b_ptr, stream, cublas_handle);
         (void)out;
         record(stop, stream);
         stop.synchronize();

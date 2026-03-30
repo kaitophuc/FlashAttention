@@ -59,11 +59,8 @@ __global__ void classification_correct_count_kernel(const float* __restrict__ lo
 
 }  // namespace
 
-Tensor classification_correct_count(const Tensor& logits, const Tensor& labels, Stream* stream) {
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_classification.cu: classification_correct_count: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_classification.cu: classification_correct_count");
+Tensor classification_correct_count(const Tensor& logits, const Tensor& labels, Stream& stream) {
+    assert_non_default_stream(stream.s, "ops_classification.cu: classification_correct_count");
     if (logits.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_classification.cu: classification_correct_count: logits must be float32.");
     }
@@ -89,10 +86,10 @@ Tensor classification_correct_count(const Tensor& logits, const Tensor& labels, 
         throw std::invalid_argument("ops_classification.cu: classification_correct_count: labels length must match logits batch dimension.");
     }
 
-    Tensor correct = Tensor::zeros({1}, DType::I32, Device::CUDA, *stream);
+    Tensor correct = Tensor::zeros({1}, DType::I32, Device::CUDA, stream);
     constexpr int kBlockSize = 256;
     const int grid = (m < 1024) ? static_cast<int>(m) : 1024;
-    classification_correct_count_kernel<kBlockSize><<<grid, kBlockSize, 0, stream->s>>>(
+    classification_correct_count_kernel<kBlockSize><<<grid, kBlockSize, 0, stream.s>>>(
         static_cast<const float*>(logits.data_),
         static_cast<const int32_t*>(labels.data_),
         static_cast<int32_t*>(correct.data_),

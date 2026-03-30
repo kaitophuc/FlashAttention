@@ -4,7 +4,7 @@ namespace {
 
 void sgd_update_py(Tensor& param, const Tensor& grad, float lr) {
     Stream stream = py_current_stream();
-    sgd_update_(param, grad, lr, &stream);
+    sgd_update_(param, grad, lr, stream);
 }
 
 }  // namespace

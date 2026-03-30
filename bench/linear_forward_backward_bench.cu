@@ -210,8 +210,8 @@ void benchmark_linear_forward_backward(benchmark::State& state, const LinearCase
     const Tensor* b_ptr = cfg->bias ? &b : nullptr;
     const int warmup = env_int("FA_LINEAR_FB_WARMUP", 50);
     for (int i = 0; i < warmup; ++i) {
-        LinearResults out = linear_forward(x, w, b_ptr, &stream, cublas_handle);
-        (void)linear_backward(dy, out.ctx, true, true, cfg->bias, &stream, cublas_handle);
+        LinearResults out = linear_forward(x, w, b_ptr, stream, cublas_handle);
+        (void)linear_backward(dy, out.ctx, true, true, cfg->bias, stream, cublas_handle);
     }
     stream.synchronize();
 
@@ -221,8 +221,8 @@ void benchmark_linear_forward_backward(benchmark::State& state, const LinearCase
         Event start;
         Event stop;
         record(start, stream);
-        LinearResults out = linear_forward(x, w, b_ptr, &stream, cublas_handle);
-        LinearGrads grads = linear_backward(dy, out.ctx, true, true, cfg->bias, &stream, cublas_handle);
+        LinearResults out = linear_forward(x, w, b_ptr, stream, cublas_handle);
+        LinearGrads grads = linear_backward(dy, out.ctx, true, true, cfg->bias, stream, cublas_handle);
         (void)grads;
         record(stop, stream);
         stop.synchronize();

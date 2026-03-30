@@ -40,7 +40,7 @@ Tensor MakeCpuTensor2D(int rows, int cols, const std::vector<float>& values) {
 
 std::vector<float> RunForwardToHost(const Tensor& x_h, Stream& stream) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
-    ReluResults out = relu_forward(x_d, &stream);
+    ReluResults out = relu_forward(x_d, stream);
     Tensor y_h = out.Y.clone(Device::CPU);
     stream.synchronize();
     return y_h.to_vector<float>();
@@ -91,7 +91,7 @@ TEST(ReluForward, RejectsNullStream) {
     }
     Stream stream;
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
-    EXPECT_THROW((void)relu_forward(x, nullptr), std::invalid_argument);
+    EXPECT_NO_THROW((void)relu_forward(x));
 }
 
 TEST(ReluForward, RejectsNonDefaultStream) {
@@ -107,7 +107,7 @@ TEST(ReluForward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_NO_THROW((void)relu_forward(x, &non_default_stream));
+    EXPECT_NO_THROW((void)relu_forward(x, non_default_stream));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
@@ -118,7 +118,7 @@ TEST(ReluForward, RejectsNonF32) {
     }
     Stream stream;
     Tensor x({4, 7}, DType::F16, Device::CUDA, stream);
-    EXPECT_THROW((void)relu_forward(x, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_forward(x, stream), std::invalid_argument);
 }
 
 TEST(ReluForward, RejectsNon2DInput) {
@@ -127,7 +127,7 @@ TEST(ReluForward, RejectsNon2DInput) {
     }
     Stream stream;
     Tensor x({4, 7, 2}, DType::F32, Device::CUDA, stream);
-    EXPECT_THROW((void)relu_forward(x, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_forward(x, stream), std::invalid_argument);
 }
 
 TEST(ReluForward, RejectsNonCudaInput) {
@@ -136,7 +136,7 @@ TEST(ReluForward, RejectsNonCudaInput) {
     }
     Stream stream;
     Tensor x({4, 7}, DType::F32, Device::CPU);
-    EXPECT_THROW((void)relu_forward(x, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_forward(x, stream), std::invalid_argument);
 }
 
 TEST(ReluBackward, RejectsNullStream) {
@@ -145,10 +145,10 @@ TEST(ReluBackward, RejectsNullStream) {
     }
     Stream stream;
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
-    ReluResults out = relu_forward(x, &stream);
+    ReluResults out = relu_forward(x, stream);
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)relu_backward(dY, out.ctx, nullptr), std::invalid_argument);
+    EXPECT_NO_THROW((void)relu_backward(dY, out.ctx));
 }
 
 TEST(ReluBackward, RejectsNonDefaultStream) {
@@ -157,7 +157,7 @@ TEST(ReluBackward, RejectsNonDefaultStream) {
     }
     Stream stream;
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
-    ReluResults out = relu_forward(x, &stream);
+    ReluResults out = relu_forward(x, stream);
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
 
     cudaStream_t raw_non_default = nullptr;
@@ -166,7 +166,7 @@ TEST(ReluBackward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_NO_THROW((void)relu_backward(dY, out.ctx, &non_default_stream));
+    EXPECT_NO_THROW((void)relu_backward(dY, out.ctx, non_default_stream));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
@@ -177,10 +177,10 @@ TEST(ReluBackward, RejectsNonF32DY) {
     }
     Stream stream;
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
-    ReluResults out = relu_forward(x, &stream);
+    ReluResults out = relu_forward(x, stream);
     Tensor dY({4, 7}, DType::F16, Device::CUDA, stream);
 
-    EXPECT_THROW((void)relu_backward(dY, out.ctx, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_backward(dY, out.ctx, stream), std::invalid_argument);
 }
 
 TEST(ReluBackward, RejectsDYShapeMismatch) {
@@ -189,10 +189,10 @@ TEST(ReluBackward, RejectsDYShapeMismatch) {
     }
     Stream stream;
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
-    ReluResults out = relu_forward(x, &stream);
+    ReluResults out = relu_forward(x, stream);
     Tensor dY({7, 4}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)relu_backward(dY, out.ctx, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_backward(dY, out.ctx, stream), std::invalid_argument);
 }
 
 TEST(ReluBackward, RejectsNullCtxPointer) {
@@ -203,7 +203,7 @@ TEST(ReluBackward, RejectsNullCtxPointer) {
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
     const ReluCtx bad_ctx{nullptr};
 
-    EXPECT_THROW((void)relu_backward(dY, bad_ctx, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_backward(dY, bad_ctx, stream), std::invalid_argument);
 }
 
 TEST(ReluBackward, RejectsDTypeMismatchCtx) {
@@ -215,7 +215,7 @@ TEST(ReluBackward, RejectsDTypeMismatchCtx) {
     const ReluCtx ctx{&x};
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)relu_backward(dY, ctx, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_backward(dY, ctx, stream), std::invalid_argument);
 }
 
 TEST(ReluBackward, RejectsDeviceMismatchCtx) {
@@ -227,7 +227,7 @@ TEST(ReluBackward, RejectsDeviceMismatchCtx) {
     const ReluCtx ctx{&x};
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)relu_backward(dY, ctx, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_backward(dY, ctx, stream), std::invalid_argument);
 }
 
 TEST(ReluBackward, RejectsNon2DDY) {
@@ -239,7 +239,7 @@ TEST(ReluBackward, RejectsNon2DDY) {
     const ReluCtx ctx{&x};
     Tensor dY({4, 7, 2}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)relu_backward(dY, ctx, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_backward(dY, ctx, stream), std::invalid_argument);
 }
 
 TEST(ReluBackward, RejectsNon2DCtxX) {
@@ -251,7 +251,7 @@ TEST(ReluBackward, RejectsNon2DCtxX) {
     const ReluCtx ctx{&x};
     Tensor dY({56, 1}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)relu_backward(dY, ctx, &stream), std::invalid_argument);
+    EXPECT_THROW((void)relu_backward(dY, ctx, stream), std::invalid_argument);
 }
 
 TEST(ReluBackward, MatchesReferenceOddShape) {
@@ -274,8 +274,8 @@ TEST(ReluBackward, MatchesReferenceOddShape) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    ReluResults out = relu_forward(x_d, &stream);
-    ReluGrads grads = relu_backward(dY_d, out.ctx, &stream);
+    ReluResults out = relu_forward(x_d, stream);
+    ReluGrads grads = relu_backward(dY_d, out.ctx, stream);
 
     const std::vector<float> expected = fa_test::reference_relu_backward(dY_ref, x_ref);
     stream.synchronize();
@@ -302,7 +302,7 @@ TEST(ReluForward, SweepAllCases) {
             Tensor x_h = MakeCpuTensor2D(c.m, c.n, x_ref);
             Tensor x_d = x_h.clone(Device::CUDA, stream);
 
-            ReluResults out = relu_forward(x_d, &stream);
+            ReluResults out = relu_forward(x_d, stream);
             Tensor y_h = out.Y.clone(Device::CPU);
             stream.synchronize();
 
@@ -375,8 +375,8 @@ TEST(ReluBackward, SweepAllCases) {
             Tensor x_d = x_h.clone(Device::CUDA, stream);
             Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-            ReluResults out = relu_forward(x_d, &stream);
-            ReluGrads grads = relu_backward(dY_d, out.ctx, &stream);
+            ReluResults out = relu_forward(x_d, stream);
+            ReluGrads grads = relu_backward(dY_d, out.ctx, stream);
             stream.synchronize();
 
             const std::vector<float> got = grads.dX.clone(Device::CPU).to_vector<float>();
@@ -495,7 +495,7 @@ TEST(ReluForward, InvariantNonNegativeOutput) {
     Stream stream;
     Tensor x_h = MakeCpuTensor2D(m, n, x_ref);
     Tensor x_d = x_h.clone(Device::CUDA, stream);
-    ReluResults out = relu_forward(x_d, &stream);
+    ReluResults out = relu_forward(x_d, stream);
     Tensor y_h = out.Y.clone(Device::CPU);
     stream.synchronize();
     const std::vector<float> y = y_h.to_vector<float>();
@@ -522,8 +522,8 @@ TEST(ReluForward, InvariantIdempotence) {
     Stream stream;
     Tensor x_h = MakeCpuTensor2D(m, n, x_ref);
     Tensor x_d = x_h.clone(Device::CUDA, stream);
-    ReluResults out1 = relu_forward(x_d, &stream);
-    ReluResults out2 = relu_forward(out1.Y, &stream);
+    ReluResults out1 = relu_forward(x_d, stream);
+    ReluResults out2 = relu_forward(out1.Y, stream);
 
     stream.synchronize();
     const std::vector<float> y1 = out1.Y.clone(Device::CPU).to_vector<float>();
@@ -557,8 +557,8 @@ TEST(ReluForward, InvariantPositiveHomogeneity) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
     Tensor ax_d = ax_h.clone(Device::CUDA, stream);
 
-    ReluResults y = relu_forward(x_d, &stream);
-    ReluResults ay = relu_forward(ax_d, &stream);
+    ReluResults y = relu_forward(x_d, stream);
+    ReluResults ay = relu_forward(ax_d, stream);
 
     stream.synchronize();
     std::vector<float> y_vec = y.Y.clone(Device::CPU).to_vector<float>();
@@ -587,8 +587,8 @@ TEST(ReluForward, InvariantDeterministicForSameInput) {
     Tensor x_h = MakeCpuTensor2D(m, n, x_ref);
     Tensor x_d = x_h.clone(Device::CUDA, stream);
 
-    ReluResults y1 = relu_forward(x_d, &stream);
-    ReluResults y2 = relu_forward(x_d, &stream);
+    ReluResults y1 = relu_forward(x_d, stream);
+    ReluResults y2 = relu_forward(x_d, stream);
     stream.synchronize();
 
     const std::vector<float> a = y1.Y.clone(Device::CPU).to_vector<float>();
@@ -628,8 +628,8 @@ TEST(ReluBackward, FiniteDifferenceGradientCheckAwayFromZero) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    ReluResults out = relu_forward(x_d, &stream);
-    ReluGrads grads = relu_backward(dY_d, out.ctx, &stream);
+    ReluResults out = relu_forward(x_d, stream);
+    ReluGrads grads = relu_backward(dY_d, out.ctx, stream);
     stream.synchronize();
     const std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
 
@@ -667,8 +667,8 @@ TEST(ReluBackward, InvariantZeroDYGivesZeroDX) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    ReluResults out = relu_forward(x_d, &stream);
-    ReluGrads grads = relu_backward(dY_d, out.ctx, &stream);
+    ReluResults out = relu_forward(x_d, stream);
+    ReluGrads grads = relu_backward(dY_d, out.ctx, stream);
     stream.synchronize();
 
     const std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
@@ -700,8 +700,8 @@ TEST(ReluBackward, InvariantMaskingRule) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    ReluResults out = relu_forward(x_d, &stream);
-    ReluGrads grads = relu_backward(dY_d, out.ctx, &stream);
+    ReluResults out = relu_forward(x_d, stream);
+    ReluGrads grads = relu_backward(dY_d, out.ctx, stream);
     stream.synchronize();
 
     const std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
@@ -747,10 +747,10 @@ TEST(ReluBackward, InvariantLinearityInDYForFixedX) {
     Tensor dY2_d = dY2_h.clone(Device::CUDA, stream);
     Tensor dYc_d = dYc_h.clone(Device::CUDA, stream);
 
-    ReluResults out = relu_forward(x_d, &stream);
-    ReluGrads g1 = relu_backward(dY1_d, out.ctx, &stream);
-    ReluGrads g2 = relu_backward(dY2_d, out.ctx, &stream);
-    ReluGrads gc = relu_backward(dYc_d, out.ctx, &stream);
+    ReluResults out = relu_forward(x_d, stream);
+    ReluGrads g1 = relu_backward(dY1_d, out.ctx, stream);
+    ReluGrads g2 = relu_backward(dY2_d, out.ctx, stream);
+    ReluGrads gc = relu_backward(dYc_d, out.ctx, stream);
     stream.synchronize();
 
     const std::vector<float> g1v = g1.dX.clone(Device::CPU).to_vector<float>();
@@ -785,9 +785,9 @@ TEST(ReluBackward, InvariantDeterministicForSameCtxAndDY) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    ReluResults out = relu_forward(x_d, &stream);
-    ReluGrads g1 = relu_backward(dY_d, out.ctx, &stream);
-    ReluGrads g2 = relu_backward(dY_d, out.ctx, &stream);
+    ReluResults out = relu_forward(x_d, stream);
+    ReluGrads g1 = relu_backward(dY_d, out.ctx, stream);
+    ReluGrads g2 = relu_backward(dY_d, out.ctx, stream);
     stream.synchronize();
 
     const std::vector<float> a = g1.dX.clone(Device::CPU).to_vector<float>();
@@ -822,8 +822,8 @@ TEST(ReluBackward, ZeroBoundaryConvention) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    ReluResults out = relu_forward(x_d, &stream);
-    ReluGrads grads = relu_backward(dY_d, out.ctx, &stream);
+    ReluResults out = relu_forward(x_d, stream);
+    ReluGrads grads = relu_backward(dY_d, out.ctx, stream);
     stream.synchronize();
 
     const std::vector<float> dX = grads.dX.clone(Device::CPU).to_vector<float>();
@@ -841,7 +841,7 @@ TEST(ReluForwardBackward, CtxStoresXByPointer) {
 
     Stream stream;
     Tensor x({6, 8}, DType::F32, Device::CUDA, stream);
-    ReluResults out = relu_forward(x, &stream);
+    ReluResults out = relu_forward(x, stream);
     ASSERT_EQ(out.ctx.X, &x);
 }
 
@@ -867,8 +867,8 @@ TEST(ReluForwardBackward, CtxPointerTracksMutatedX) {
     Tensor x_d = x_h.clone(Device::CUDA, stream);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    ReluResults out = relu_forward(x_d, &stream);
-    ReluGrads g_before = relu_backward(dY_d, out.ctx, &stream);
+    ReluResults out = relu_forward(x_d, stream);
+    ReluGrads g_before = relu_backward(dY_d, out.ctx, stream);
 
     std::vector<float> x2_ref = x_ref;
     for (float& v : x2_ref) {
@@ -877,7 +877,7 @@ TEST(ReluForwardBackward, CtxPointerTracksMutatedX) {
     Tensor x2_h = MakeCpuTensor2D(m, n, x2_ref);
     x_d.copy_from(x2_h, stream);
 
-    ReluGrads g_after = relu_backward(dY_d, out.ctx, &stream);
+    ReluGrads g_after = relu_backward(dY_d, out.ctx, stream);
     stream.synchronize();
 
     const std::vector<float> before = g_before.dX.clone(Device::CPU).to_vector<float>();
@@ -914,13 +914,13 @@ TEST(ReluForwardBackward, TwoStageReuseNoMidTransfer) {
     Tensor dY1_d = MakeCpuTensor2D(m, n, dY1_ref).clone(Device::CUDA, stream);
     Tensor dY2_d = MakeCpuTensor2D(m, n, dY2_ref).clone(Device::CUDA, stream);
 
-    ReluResults out1 = relu_forward(x_d, &stream);
-    ReluGrads g1 = relu_backward(dY1_d, out1.ctx, &stream);
+    ReluResults out1 = relu_forward(x_d, stream);
+    ReluGrads g1 = relu_backward(dY1_d, out1.ctx, stream);
 
     ApplyAffineInplaceF32(x_d, 0.5f, 0.125f, stream);
 
-    ReluResults out2 = relu_forward(x_d, &stream);
-    ReluGrads g2 = relu_backward(dY2_d, out2.ctx, &stream);
+    ReluResults out2 = relu_forward(x_d, stream);
+    ReluGrads g2 = relu_backward(dY2_d, out2.ctx, stream);
 
     stream.synchronize();
     const std::vector<float> g1_dx = g1.dX.clone(Device::CPU).to_vector<float>();
@@ -969,11 +969,11 @@ TEST(ReluForwardBackward, CtxIsolationAcrossMultipleForwardsNoMidTransfer) {
     Tensor dY1_d = MakeCpuTensor2D(m1, n1, dY1_ref).clone(Device::CUDA, stream);
     Tensor dY2_d = MakeCpuTensor2D(m2, n2, dY2_ref).clone(Device::CUDA, stream);
 
-    ReluResults out1 = relu_forward(x1_d, &stream);
-    ReluResults out2 = relu_forward(x2_d, &stream);
+    ReluResults out1 = relu_forward(x1_d, stream);
+    ReluResults out2 = relu_forward(x2_d, stream);
 
-    ReluGrads g2 = relu_backward(dY2_d, out2.ctx, &stream);
-    ReluGrads g1 = relu_backward(dY1_d, out1.ctx, &stream);
+    ReluGrads g2 = relu_backward(dY2_d, out2.ctx, stream);
+    ReluGrads g1 = relu_backward(dY1_d, out1.ctx, stream);
 
     stream.synchronize();
     const std::vector<float> got1 = g1.dX.clone(Device::CPU).to_vector<float>();
@@ -1009,13 +1009,13 @@ TEST(ReluForwardBackward, SweepAllCasesNoMidTransfer) {
             Tensor dY1_d = MakeCpuTensor2D(c.m, c.n, dY1_ref).clone(Device::CUDA, stream);
             Tensor dY2_d = MakeCpuTensor2D(c.m, c.n, dY2_ref).clone(Device::CUDA, stream);
 
-            ReluResults out1 = relu_forward(x_d, &stream);
-            ReluGrads g1 = relu_backward(dY1_d, out1.ctx, &stream);
+            ReluResults out1 = relu_forward(x_d, stream);
+            ReluGrads g1 = relu_backward(dY1_d, out1.ctx, stream);
 
             ApplyAffineInplaceF32(x_d, 0.5f, 0.125f, stream);
 
-            ReluResults out2 = relu_forward(x_d, &stream);
-            ReluGrads g2 = relu_backward(dY2_d, out2.ctx, &stream);
+            ReluResults out2 = relu_forward(x_d, stream);
+            ReluGrads g2 = relu_backward(dY2_d, out2.ctx, stream);
 
             stream.synchronize();
             const std::vector<float> g1_dx = g1.dX.clone(Device::CPU).to_vector<float>();
@@ -1091,7 +1091,7 @@ TEST(ReluForward, SingleStreamOrderingReuseStressFixedShape) {
             fa_test::SampleUniformVector(static_cast<size_t>(m) * n, -1.0f, 1.0f, seed);
 
         Tensor x_d = MakeCpuTensor2D(m, n, x_ref).clone(Device::CUDA, stream);
-        ReluResults out = relu_forward(x_d, &stream);
+        ReluResults out = relu_forward(x_d, stream);
 
         jobs.push_back(fa_test::QueuedReluForwardJob{
             m,
@@ -1131,7 +1131,7 @@ TEST(ReluForward, SingleStreamOrderingReuseStressShapeCycleABC) {
         const std::vector<float> x_ref =
             fa_test::SampleUniformVector(static_cast<size_t>(c.m) * c.n, c.lo, c.hi, seed);
         Tensor x_d = MakeCpuTensor2D(c.m, c.n, x_ref).clone(Device::CUDA, stream);
-        ReluResults out = relu_forward(x_d, &stream);
+        ReluResults out = relu_forward(x_d, stream);
 
         jobs.push_back(fa_test::QueuedReluForwardJob{
             c.m,
@@ -1173,8 +1173,8 @@ TEST(ReluBackward, SingleStreamOrderingReuseStressFixedShape) {
         Tensor x_d = MakeCpuTensor2D(m, n, x_ref).clone(Device::CUDA, stream);
         Tensor dY_d = MakeCpuTensor2D(m, n, dY_ref).clone(Device::CUDA, stream);
 
-        ReluResults out = relu_forward(x_d, &stream);
-        ReluGrads g = relu_backward(dY_d, out.ctx, &stream);
+        ReluResults out = relu_forward(x_d, stream);
+        ReluGrads g = relu_backward(dY_d, out.ctx, stream);
 
         jobs.push_back(fa_test::QueuedReluBackwardJob{
             m,
@@ -1220,8 +1220,8 @@ TEST(ReluBackward, SingleStreamOrderingReuseStressShapeCycleABC) {
         Tensor x_d = MakeCpuTensor2D(c.m, c.n, x_ref).clone(Device::CUDA, stream);
         Tensor dY_d = MakeCpuTensor2D(c.m, c.n, dY_ref).clone(Device::CUDA, stream);
 
-        ReluResults out = relu_forward(x_d, &stream);
-        ReluGrads g = relu_backward(dY_d, out.ctx, &stream);
+        ReluResults out = relu_forward(x_d, stream);
+        ReluGrads g = relu_backward(dY_d, out.ctx, stream);
 
         jobs.push_back(fa_test::QueuedReluBackwardJob{
             c.m,

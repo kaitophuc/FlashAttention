@@ -8,7 +8,7 @@ std::shared_ptr<Tensor> softmax_forward_py(const std::shared_ptr<Tensor>& x) {
     }
 
     Stream stream = py_current_stream();
-    Tensor y = softmax_forward(*x, &stream);
+    Tensor y = softmax_forward(*x, stream);
     return make_tensor_shared(std::move(y));
 }
 
@@ -18,7 +18,7 @@ std::shared_ptr<Tensor> softmax_backward_py(const std::shared_ptr<Tensor>& dY, c
     }
 
     Stream stream = py_current_stream();
-    SoftmaxGrads grads = softmax_backward(*dY, *y, &stream);
+    SoftmaxGrads grads = softmax_backward(*dY, *y, stream);
     return make_tensor_shared(std::move(grads.dX));
 }
 
@@ -30,14 +30,14 @@ std::pair<std::shared_ptr<Tensor>, SoftmaxCrossEntropyContextPy> softmax_cross_e
     }
 
     Stream stream = py_current_stream();
-    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(*logits, *labels, &stream);
+    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(*logits, *labels, stream);
     SoftmaxCrossEntropyContextPy ctx(std::move(out.ctx), labels);
     return {make_tensor_shared(std::move(out.loss)), std::move(ctx)};
 }
 
 std::shared_ptr<Tensor> softmax_cross_entropy_backward_py(const SoftmaxCrossEntropyContextPy& ctx) {
     Stream stream = py_current_stream();
-    SoftmaxCrossEntropyGrads grads = softmax_cross_entropy_backward(ctx.ctx, &stream);
+    SoftmaxCrossEntropyGrads grads = softmax_cross_entropy_backward(ctx.ctx, stream);
     return make_tensor_shared(std::move(grads.dX));
 }
 

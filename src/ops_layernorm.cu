@@ -162,11 +162,8 @@ LayerNormResults layernorm_forward(const Tensor& X,
                                    const Tensor& gamma,
                                    const Tensor& beta,
                                    float eps,
-                                   Stream* stream) {
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_layernorm.cu: Layernorm_forward");
+                                   Stream& stream) {
+    assert_non_default_stream(stream.s, "ops_layernorm.cu: Layernorm_forward");
     if (eps <= 0.0f) {
         throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: eps must be greater than 0.");
     }
@@ -195,12 +192,12 @@ LayerNormResults layernorm_forward(const Tensor& X,
     const int m = static_cast<int>(m64);
     const int n = static_cast<int>(n64);
 
-    Tensor Y = Tensor::empty(X.shape_, X.dtype_, X.device_, *stream);
-    Tensor mean = Tensor::empty({m64}, X.dtype_, X.device_, *stream);
-    Tensor rstd = Tensor::empty({m64}, X.dtype_, X.device_, *stream);
+    Tensor Y = Tensor::empty(X.shape_, X.dtype_, X.device_, stream);
+    Tensor mean = Tensor::empty({m64}, X.dtype_, X.device_, stream);
+    Tensor rstd = Tensor::empty({m64}, X.dtype_, X.device_, stream);
 
     constexpr int block_size = 256;
-    layernorm_forward_kernel<block_size><<<m, block_size, 0, stream->s>>>(
+    layernorm_forward_kernel<block_size><<<m, block_size, 0, stream.s>>>(
         static_cast<const float*>(X.data_),
         static_cast<const float*>(gamma.data_),
         static_cast<const float*>(beta.data_),
@@ -219,11 +216,8 @@ LayerNormGrads layernorm_backward(const Tensor& dY,
                                   bool needs_dX,
                                   bool needs_dgamma,
                                   bool needs_dbeta,
-                                  Stream* stream) {
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_layernorm.cu: Layernorm_backward");
+                                  Stream& stream) {
+    assert_non_default_stream(stream.s, "ops_layernorm.cu: Layernorm_backward");
     if (ctx.X == nullptr || ctx.gamma == nullptr) {
         throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: ctx.X and ctx.gamma cannot be null.");
     }
@@ -265,22 +259,22 @@ LayerNormGrads layernorm_backward(const Tensor& dY,
 
     std::optional<Tensor> dX;
     if (needs_dX) {
-        dX = Tensor::empty(X.shape_, X.dtype_, X.device_, *stream);
+        dX = Tensor::empty(X.shape_, X.dtype_, X.device_, stream);
     }
 
     std::optional<Tensor> dgamma;
     if (needs_dgamma) {
-        dgamma = Tensor::zeros({ctx.n}, gamma.dtype_, gamma.device_, *stream);
+        dgamma = Tensor::zeros({ctx.n}, gamma.dtype_, gamma.device_, stream);
     }
 
     std::optional<Tensor> dbeta;
     if (needs_dbeta) {
-        dbeta = Tensor::zeros({ctx.n}, gamma.dtype_, gamma.device_, *stream);
+        dbeta = Tensor::zeros({ctx.n}, gamma.dtype_, gamma.device_, stream);
     }
 
     if (needs_dX) {
         constexpr int block_size = 256;
-        layernorm_backward_dx_kernel<block_size><<<m, block_size, 0, stream->s>>>(
+        layernorm_backward_dx_kernel<block_size><<<m, block_size, 0, stream.s>>>(
             static_cast<const float*>(dY.data_),
             static_cast<const float*>(X.data_),
             static_cast<const float*>(gamma.data_),
@@ -299,7 +293,7 @@ LayerNormGrads layernorm_backward(const Tensor& dY,
         float* dgamma_ptr = needs_dgamma ? static_cast<float*>(dgamma->data_) : nullptr;
         float* dbeta_ptr = needs_dbeta ? static_cast<float*>(dbeta->data_) : nullptr;
 
-        layernorm_backward_param_grads_kernel<block_size><<<grid_size, block_size, 0, stream->s>>>(
+        layernorm_backward_param_grads_kernel<block_size><<<grid_size, block_size, 0, stream.s>>>(
             static_cast<const float*>(dY.data_),
             static_cast<const float*>(X.data_),
             static_cast<const float*>(mean.data_),

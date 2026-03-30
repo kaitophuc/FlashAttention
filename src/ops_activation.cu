@@ -105,12 +105,9 @@ __global__ void relu_backward_vec4_kernel(
     }
 }
 
-ReluResults relu_forward(const Tensor& X, Stream* stream) {
+ReluResults relu_forward(const Tensor& X, Stream& stream) {
     // Check input shapes and dtypes.
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_activation.cu: Relu_forward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_activation.cu: Relu_forward");
+    assert_non_default_stream(stream.s, "ops_activation.cu: Relu_forward");
     if (X.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_activation.cu: Relu_forward: Only float32 tensors are supported.");
     }
@@ -122,7 +119,7 @@ ReluResults relu_forward(const Tensor& X, Stream* stream) {
     }
     
     // Allocate output tensor.
-    Tensor Y = Tensor::empty(X.shape_, X.dtype_, X.device_, *stream);
+    Tensor Y = Tensor::empty(X.shape_, X.dtype_, X.device_, stream);
 
     // Launch CUDA kernel to compute ReLU.
     const int total_elements = X.numel();
@@ -138,26 +135,23 @@ ReluResults relu_forward(const Tensor& X, Stream* stream) {
         const int total_vec4_chunks = (total_elements + 3) / 4;
         const int vec_grid_size = (total_vec4_chunks + block_size - 1) / block_size;
 
-        relu_forward_vec4_kernel<block_size><<<vec_grid_size, block_size, 0, stream->s>>>(
+        relu_forward_vec4_kernel<block_size><<<vec_grid_size, block_size, 0, stream.s>>>(
             x_ptr,
             y_ptr,
             total_elements,
             total_vec4_chunks);
     } else {
         const int grid_size = (total_elements + block_size - 1) / block_size;
-        relu_forward_scalar_kernel<block_size><<<grid_size, block_size, 0, stream->s>>>(
+        relu_forward_scalar_kernel<block_size><<<grid_size, block_size, 0, stream.s>>>(
             x_ptr, y_ptr, total_elements);
     }
 
     return ReluResults{std::move(Y), ReluCtx{&X}};
 }
 
-ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream* stream) {
+ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream& stream) {
     // Check input shapes and dtypes.
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_activation.cu: Relu_backward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_activation.cu: Relu_backward");
+    assert_non_default_stream(stream.s, "ops_activation.cu: Relu_backward");
     if (ctx.X == nullptr) {
         throw std::invalid_argument("ops_activation.cu: Relu_backward: ctx.X cannot be null.");
     }
@@ -187,7 +181,7 @@ ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream* stream) {
     }
 
     // Allocate output tensor for dX.
-    Tensor dX = Tensor::empty(ctx.X->shape_, ctx.X->dtype_, ctx.X->device_, *stream);
+    Tensor dX = Tensor::empty(ctx.X->shape_, ctx.X->dtype_, ctx.X->device_, stream);
 
     // Launch CUDA kernel to compute dX.
     const int total_elements = dY.numel();
@@ -205,7 +199,7 @@ ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream* stream) {
         const int total_vec4_chunks = (total_elements + 3) / 4;
         const int vec_grid_size = (total_vec4_chunks + block_size - 1) / block_size;
 
-        relu_backward_vec4_kernel<block_size><<<vec_grid_size, block_size, 0, stream->s>>>(
+        relu_backward_vec4_kernel<block_size><<<vec_grid_size, block_size, 0, stream.s>>>(
             dy_ptr,
             x_ptr,
             dx_ptr,
@@ -213,7 +207,7 @@ ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream* stream) {
             total_vec4_chunks);
     } else {
         const int grid_size = (total_elements + block_size - 1) / block_size;
-        relu_backward_scalar_kernel<block_size><<<grid_size, block_size, 0, stream->s>>>(
+        relu_backward_scalar_kernel<block_size><<<grid_size, block_size, 0, stream.s>>>(
             dy_ptr, x_ptr, dx_ptr, total_elements);
     }
 

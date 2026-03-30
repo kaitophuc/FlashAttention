@@ -87,7 +87,7 @@ float ForwardLossDotDY(const std::vector<float>& x,
     Tensor gamma_d = gamma_h.clone(Device::CUDA, stream);
     Tensor beta_d = beta_h.clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
     std::vector<float> y = out.Y.clone(Device::CPU).to_vector<float>();
     stream.synchronize();
 
@@ -104,7 +104,7 @@ TEST(LayerNormForward, RejectsNullStream) {
     Tensor gamma({7}, DType::F32, Device::CUDA, stream);
     Tensor beta({7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)layernorm_forward(x, gamma, beta, 1e-5f, nullptr), std::invalid_argument);
+    EXPECT_NO_THROW((void)layernorm_forward(x, gamma, beta, 1e-5f));
 }
 
 TEST(LayerNormForward, RejectsNonDefaultStream) {
@@ -123,7 +123,7 @@ TEST(LayerNormForward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_NO_THROW((void)layernorm_forward(x, gamma, beta, 1e-5f, &non_default_stream));
+    EXPECT_NO_THROW((void)layernorm_forward(x, gamma, beta, 1e-5f, non_default_stream));
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
 
@@ -137,8 +137,8 @@ TEST(LayerNormForward, RejectsEpsNonPositive) {
     Tensor gamma({7}, DType::F32, Device::CUDA, stream);
     Tensor beta({7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)layernorm_forward(x, gamma, beta, 0.0f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_forward(x, gamma, beta, -1e-5f, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x, gamma, beta, 0.0f, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x, gamma, beta, -1e-5f, stream), std::invalid_argument);
 }
 
 TEST(LayerNormForward, RejectsNonF32) {
@@ -154,9 +154,9 @@ TEST(LayerNormForward, RejectsNonF32) {
     Tensor beta_bad({7}, DType::F16, Device::CUDA, stream);
     Tensor beta_good({7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)layernorm_forward(x_bad, gamma_good, beta_good, 1e-5f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_forward(x_good, gamma_bad, beta_good, 1e-5f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_forward(x_good, gamma_good, beta_bad, 1e-5f, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_bad, gamma_good, beta_good, 1e-5f, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_good, gamma_bad, beta_good, 1e-5f, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_good, gamma_good, beta_bad, 1e-5f, stream), std::invalid_argument);
 }
 
 TEST(LayerNormForward, RejectsNonCudaInput) {
@@ -172,9 +172,9 @@ TEST(LayerNormForward, RejectsNonCudaInput) {
     Tensor beta_cpu({7}, DType::F32, Device::CPU);
     Tensor beta_cuda({7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)layernorm_forward(x_cpu, gamma_cuda, beta_cuda, 1e-5f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_forward(x_cuda, gamma_cpu, beta_cuda, 1e-5f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_forward(x_cuda, gamma_cuda, beta_cpu, 1e-5f, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_cpu, gamma_cuda, beta_cuda, 1e-5f, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_cuda, gamma_cpu, beta_cuda, 1e-5f, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_cuda, gamma_cuda, beta_cpu, 1e-5f, stream), std::invalid_argument);
 }
 
 TEST(LayerNormForward, RejectsShapeMismatch) {
@@ -192,11 +192,11 @@ TEST(LayerNormForward, RejectsShapeMismatch) {
     Tensor gamma_good({7}, DType::F32, Device::CUDA, stream);
     Tensor beta_good({7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)layernorm_forward(x_non2d, gamma_good, beta_good, 1e-5f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_forward(x_good, gamma_non1d, beta_good, 1e-5f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_forward(x_good, gamma_good, beta_non1d, 1e-5f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_forward(x_good, gamma_bad, beta_good, 1e-5f, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_forward(x_good, gamma_good, beta_bad, 1e-5f, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_non2d, gamma_good, beta_good, 1e-5f, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_good, gamma_non1d, beta_good, 1e-5f, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_good, gamma_good, beta_non1d, 1e-5f, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_good, gamma_bad, beta_good, 1e-5f, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_forward(x_good, gamma_good, beta_bad, 1e-5f, stream), std::invalid_argument);
 }
 
 TEST(LayerNormBackward, RejectsNullStream) {
@@ -208,10 +208,10 @@ TEST(LayerNormBackward, RejectsNullStream) {
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
     Tensor gamma({7}, DType::F32, Device::CUDA, stream);
     Tensor beta({7}, DType::F32, Device::CUDA, stream);
-    LayerNormResults out = layernorm_forward(x, gamma, beta, 1e-5f, &stream);
+    LayerNormResults out = layernorm_forward(x, gamma, beta, 1e-5f, stream);
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)layernorm_backward(dY, out.ctx, true, true, true, nullptr), std::invalid_argument);
+    EXPECT_NO_THROW((void)layernorm_backward(dY, out.ctx, true, true, true));
 }
 
 TEST(LayerNormBackward, RejectsNonDefaultStream) {
@@ -223,7 +223,7 @@ TEST(LayerNormBackward, RejectsNonDefaultStream) {
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
     Tensor gamma({7}, DType::F32, Device::CUDA, stream);
     Tensor beta({7}, DType::F32, Device::CUDA, stream);
-    LayerNormResults out = layernorm_forward(x, gamma, beta, 1e-5f, &stream);
+    LayerNormResults out = layernorm_forward(x, gamma, beta, 1e-5f, stream);
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
 
     cudaStream_t raw_non_default = nullptr;
@@ -232,7 +232,7 @@ TEST(LayerNormBackward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_NO_THROW((void)layernorm_backward(dY, out.ctx, true, true, true, &non_default_stream));
+    EXPECT_NO_THROW((void)layernorm_backward(dY, out.ctx, true, true, true, non_default_stream));
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
 
@@ -245,15 +245,15 @@ TEST(LayerNormBackward, RejectsNullCtxPointers) {
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
     Tensor gamma({7}, DType::F32, Device::CUDA, stream);
     Tensor beta({7}, DType::F32, Device::CUDA, stream);
-    LayerNormResults out = layernorm_forward(x, gamma, beta, 1e-5f, &stream);
+    LayerNormResults out = layernorm_forward(x, gamma, beta, 1e-5f, stream);
     Tensor dY({4, 7}, DType::F32, Device::CUDA, stream);
 
     LayerNormCtx bad_x{nullptr, out.ctx.gamma, std::move(out.ctx.mean), std::move(out.ctx.rstd), out.ctx.eps, out.ctx.m, out.ctx.n};
-    EXPECT_THROW((void)layernorm_backward(dY, bad_x, true, true, true, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY, bad_x, true, true, true, stream), std::invalid_argument);
 
-    LayerNormResults out2 = layernorm_forward(x, gamma, beta, 1e-5f, &stream);
+    LayerNormResults out2 = layernorm_forward(x, gamma, beta, 1e-5f, stream);
     LayerNormCtx bad_gamma{out2.ctx.X, nullptr, std::move(out2.ctx.mean), std::move(out2.ctx.rstd), out2.ctx.eps, out2.ctx.m, out2.ctx.n};
-    EXPECT_THROW((void)layernorm_backward(dY, bad_gamma, true, true, true, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY, bad_gamma, true, true, true, stream), std::invalid_argument);
 }
 
 TEST(LayerNormBackward, RejectsInvalidCtxAndInputShapes) {
@@ -265,7 +265,7 @@ TEST(LayerNormBackward, RejectsInvalidCtxAndInputShapes) {
     Tensor x({4, 7}, DType::F32, Device::CUDA, stream);
     Tensor gamma({7}, DType::F32, Device::CUDA, stream);
     Tensor beta({7}, DType::F32, Device::CUDA, stream);
-    LayerNormResults out = layernorm_forward(x, gamma, beta, 1e-5f, &stream);
+    LayerNormResults out = layernorm_forward(x, gamma, beta, 1e-5f, stream);
 
     Tensor dY_non2d({4, 7, 1}, DType::F32, Device::CUDA, stream);
     Tensor dY_bad_shape({7, 4}, DType::F32, Device::CUDA, stream);
@@ -273,32 +273,32 @@ TEST(LayerNormBackward, RejectsInvalidCtxAndInputShapes) {
     Tensor dY_cpu({4, 7}, DType::F32, Device::CPU);
     Tensor dY_f16({4, 7}, DType::F16, Device::CUDA, stream);
 
-    EXPECT_THROW((void)layernorm_backward(dY_non2d, out.ctx, true, true, true, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_backward(dY_bad_shape, out.ctx, true, true, true, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_backward(dY_cpu, out.ctx, true, true, true, &stream), std::invalid_argument);
-    EXPECT_THROW((void)layernorm_backward(dY_f16, out.ctx, true, true, true, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY_non2d, out.ctx, true, true, true, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY_bad_shape, out.ctx, true, true, true, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY_cpu, out.ctx, true, true, true, stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY_f16, out.ctx, true, true, true, stream), std::invalid_argument);
 
-    LayerNormResults out2 = layernorm_forward(x, gamma, beta, 1e-5f, &stream);
+    LayerNormResults out2 = layernorm_forward(x, gamma, beta, 1e-5f, stream);
     out2.ctx.eps = 0.0f;
-    EXPECT_THROW((void)layernorm_backward(dY_good, out2.ctx, true, true, true, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY_good, out2.ctx, true, true, true, stream), std::invalid_argument);
 
-    LayerNormResults out3 = layernorm_forward(x, gamma, beta, 1e-5f, &stream);
+    LayerNormResults out3 = layernorm_forward(x, gamma, beta, 1e-5f, stream);
     out3.ctx.m += 1;
-    EXPECT_THROW((void)layernorm_backward(dY_good, out3.ctx, true, true, true, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY_good, out3.ctx, true, true, true, stream), std::invalid_argument);
 
-    LayerNormResults out4 = layernorm_forward(x, gamma, beta, 1e-5f, &stream);
+    LayerNormResults out4 = layernorm_forward(x, gamma, beta, 1e-5f, stream);
     out4.ctx.n += 1;
-    EXPECT_THROW((void)layernorm_backward(dY_good, out4.ctx, true, true, true, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY_good, out4.ctx, true, true, true, stream), std::invalid_argument);
 
     Tensor mean_bad({5}, DType::F32, Device::CUDA, stream);
     Tensor rstd_good({4}, DType::F32, Device::CUDA, stream);
     LayerNormCtx bad_mean{&x, &gamma, std::move(mean_bad), std::move(rstd_good), 1e-5f, 4, 7};
-    EXPECT_THROW((void)layernorm_backward(dY_good, bad_mean, true, true, true, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY_good, bad_mean, true, true, true, stream), std::invalid_argument);
 
     Tensor mean_good({4}, DType::F32, Device::CUDA, stream);
     Tensor rstd_bad({5}, DType::F32, Device::CUDA, stream);
     LayerNormCtx bad_rstd{&x, &gamma, std::move(mean_good), std::move(rstd_bad), 1e-5f, 4, 7};
-    EXPECT_THROW((void)layernorm_backward(dY_good, bad_rstd, true, true, true, &stream), std::invalid_argument);
+    EXPECT_THROW((void)layernorm_backward(dY_good, bad_rstd, true, true, true, stream), std::invalid_argument);
 }
 
 TEST(LayerNormForward, MatchesReferenceOddShape) {
@@ -322,7 +322,7 @@ TEST(LayerNormForward, MatchesReferenceOddShape) {
     Tensor gamma_d = MakeCpuTensor1D(n, gamma).clone(Device::CUDA, stream);
     Tensor beta_d = MakeCpuTensor1D(n, beta).clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
     std::vector<float> y = out.Y.clone(Device::CPU).to_vector<float>();
     std::vector<float> mean = out.ctx.mean.clone(Device::CPU).to_vector<float>();
     std::vector<float> rstd = out.ctx.rstd.clone(Device::CPU).to_vector<float>();
@@ -358,8 +358,8 @@ TEST(LayerNormBackward, MatchesReferenceAllGradsOddShape) {
     Tensor beta_d = MakeCpuTensor1D(n, beta).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY).clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-    LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, true, true, true, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+    LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, true, true, true, stream);
 
     ASSERT_TRUE(grads.has_dX);
     ASSERT_TRUE(grads.has_dgamma);
@@ -406,7 +406,7 @@ TEST(LayerNormBackward, NeedsGradFlagsMatrix) {
     Tensor beta_d = MakeCpuTensor1D(n, beta).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY).clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
     std::vector<float> mean = out.ctx.mean.clone(Device::CPU).to_vector<float>();
     std::vector<float> rstd = out.ctx.rstd.clone(Device::CPU).to_vector<float>();
 
@@ -414,7 +414,7 @@ TEST(LayerNormBackward, NeedsGradFlagsMatrix) {
     for (bool need_dx : flag_vals) {
         for (bool need_dgamma : flag_vals) {
             for (bool need_dbeta : flag_vals) {
-                LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, need_dx, need_dgamma, need_dbeta, &stream);
+                LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, need_dx, need_dgamma, need_dbeta, stream);
 
                 EXPECT_EQ(grads.has_dX, need_dx);
                 EXPECT_EQ(grads.has_dgamma, need_dgamma);
@@ -466,7 +466,7 @@ TEST(LayerNormForward, SweepAllCases) {
             Tensor gamma_d = MakeCpuTensor1D(c.n, gamma).clone(Device::CUDA, stream);
             Tensor beta_d = MakeCpuTensor1D(c.n, beta).clone(Device::CUDA, stream);
 
-            LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
+            LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
             std::vector<float> y = out.Y.clone(Device::CPU).to_vector<float>();
             stream.synchronize();
 
@@ -540,8 +540,8 @@ TEST(LayerNormBackward, SweepAllCases) {
             Tensor beta_d = MakeCpuTensor1D(c.n, beta).clone(Device::CUDA, stream);
             Tensor dY_d = MakeCpuTensor2D(c.m, c.n, dY).clone(Device::CUDA, stream);
 
-            LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-            LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, true, true, true, &stream);
+            LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+            LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, true, true, true, stream);
 
             std::vector<float> dX = grads.dX->clone(Device::CPU).to_vector<float>();
             std::vector<float> dgamma = grads.dgamma->clone(Device::CPU).to_vector<float>();
@@ -659,7 +659,7 @@ TEST(LayerNormForward, NumericEdgePatternsAndShapes) {
         Tensor gamma_d = MakeCpuTensor1D(c.n, c.gamma).clone(Device::CUDA, stream);
         Tensor beta_d = MakeCpuTensor1D(c.n, c.beta).clone(Device::CUDA, stream);
 
-        LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
+        LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
         std::vector<float> y = out.Y.clone(Device::CPU).to_vector<float>();
         stream.synchronize();
 
@@ -691,7 +691,7 @@ TEST(LayerNormForward, InvariantIdentityAffineAndRowwiseNormalization) {
     Tensor gamma_d = MakeCpuTensor1D(n, gamma).clone(Device::CUDA, stream);
     Tensor beta_d = MakeCpuTensor1D(n, beta).clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
     std::vector<float> y = out.Y.clone(Device::CPU).to_vector<float>();
     stream.synchronize();
 
@@ -734,8 +734,8 @@ TEST(LayerNormForward, InvariantDeterministicForSameInput) {
     Tensor gamma_d = MakeCpuTensor1D(n, gamma).clone(Device::CUDA, stream);
     Tensor beta_d = MakeCpuTensor1D(n, beta).clone(Device::CUDA, stream);
 
-    LayerNormResults out1 = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-    LayerNormResults out2 = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
+    LayerNormResults out1 = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+    LayerNormResults out2 = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
     stream.synchronize();
 
     const std::vector<float> y1 = out1.Y.clone(Device::CPU).to_vector<float>();
@@ -781,8 +781,8 @@ TEST(LayerNormBackward, FiniteDifferenceGradientCheckSmall) {
     Tensor beta_d = MakeCpuTensor1D(n, beta).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY).clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-    LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, true, true, true, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+    LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, true, true, true, stream);
     stream.synchronize();
 
     const std::vector<float> dX = grads.dX->clone(Device::CPU).to_vector<float>();
@@ -851,8 +851,8 @@ TEST(LayerNormBackward, InvariantZeroDYGivesZeroGrads) {
     Tensor beta_d = MakeCpuTensor1D(n, beta).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY).clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-    LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, true, true, true, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+    LayerNormGrads grads = layernorm_backward(dY_d, out.ctx, true, true, true, stream);
     stream.synchronize();
 
     ExpectVectorNear(grads.dX->clone(Device::CPU).to_vector<float>(),
@@ -905,10 +905,10 @@ TEST(LayerNormBackward, InvariantLinearityInDYForFixedInputs) {
     Tensor dY2_d = MakeCpuTensor2D(m, n, dY2).clone(Device::CUDA, stream);
     Tensor dYc_d = MakeCpuTensor2D(m, n, dYc).clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-    LayerNormGrads g1 = layernorm_backward(dY1_d, out.ctx, true, true, true, &stream);
-    LayerNormGrads g2 = layernorm_backward(dY2_d, out.ctx, true, true, true, &stream);
-    LayerNormGrads gc = layernorm_backward(dYc_d, out.ctx, true, true, true, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+    LayerNormGrads g1 = layernorm_backward(dY1_d, out.ctx, true, true, true, stream);
+    LayerNormGrads g2 = layernorm_backward(dY2_d, out.ctx, true, true, true, stream);
+    LayerNormGrads gc = layernorm_backward(dYc_d, out.ctx, true, true, true, stream);
     stream.synchronize();
 
     const std::vector<float> g1dx = g1.dX->clone(Device::CPU).to_vector<float>();
@@ -956,7 +956,7 @@ TEST(LayerNormForwardBackward, CtxStoresPointersAndCachedStats) {
     Tensor gamma_d = MakeCpuTensor1D(n, gamma).clone(Device::CUDA, stream);
     Tensor beta_d = MakeCpuTensor1D(n, beta).clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
 
     ASSERT_EQ(out.ctx.X, &x_d);
     ASSERT_EQ(out.ctx.gamma, &gamma_d);
@@ -992,13 +992,13 @@ TEST(LayerNormForwardBackward, CtxPointerTracksMutatedGamma) {
     Tensor beta_d = MakeCpuTensor1D(n, beta).clone(Device::CUDA, stream);
     Tensor dY_d = MakeCpuTensor2D(m, n, dY).clone(Device::CUDA, stream);
 
-    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-    LayerNormGrads g_before = layernorm_backward(dY_d, out.ctx, true, false, false, &stream);
+    LayerNormResults out = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+    LayerNormGrads g_before = layernorm_backward(dY_d, out.ctx, true, false, false, stream);
     ASSERT_TRUE(g_before.dX.has_value());
 
     ApplyAffineInplaceF32(gamma_d, 0.5f, 0.125f, stream);
 
-    LayerNormGrads g_after = layernorm_backward(dY_d, out.ctx, true, false, false, &stream);
+    LayerNormGrads g_after = layernorm_backward(dY_d, out.ctx, true, false, false, stream);
     ASSERT_TRUE(g_after.dX.has_value());
 
     const std::vector<float> mean = out.ctx.mean.clone(Device::CPU).to_vector<float>();
@@ -1041,15 +1041,15 @@ TEST(LayerNormForwardBackward, TwoStageReuseNoMidTransfer) {
     Tensor dY1_d = MakeCpuTensor2D(m, n, dY1).clone(Device::CUDA, stream);
     Tensor dY2_d = MakeCpuTensor2D(m, n, dY2).clone(Device::CUDA, stream);
 
-    LayerNormResults out1 = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-    LayerNormGrads g1 = layernorm_backward(dY1_d, out1.ctx, true, true, true, &stream);
+    LayerNormResults out1 = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+    LayerNormGrads g1 = layernorm_backward(dY1_d, out1.ctx, true, true, true, stream);
 
     ApplyAffineInplaceF32(x_d, 0.5f, 0.125f, stream);
     ApplyAffineInplaceF32(gamma_d, -0.75f, 0.25f, stream);
     ApplyAffineInplaceF32(beta_d, 0.9f, -0.05f, stream);
 
-    LayerNormResults out2 = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-    LayerNormGrads g2 = layernorm_backward(dY2_d, out2.ctx, true, true, true, &stream);
+    LayerNormResults out2 = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+    LayerNormGrads g2 = layernorm_backward(dY2_d, out2.ctx, true, true, true, stream);
 
     stream.synchronize();
 
@@ -1122,11 +1122,11 @@ TEST(LayerNormForwardBackward, CtxIsolationAcrossMultipleForwardsNoMidTransfer) 
     Tensor b2_d = MakeCpuTensor1D(n2, b2).clone(Device::CUDA, stream);
     Tensor dY2_d = MakeCpuTensor2D(m2, n2, dY2).clone(Device::CUDA, stream);
 
-    LayerNormResults out1 = layernorm_forward(x1_d, g1_d, b1_d, eps, &stream);
-    LayerNormResults out2 = layernorm_forward(x2_d, g2_d, b2_d, eps, &stream);
+    LayerNormResults out1 = layernorm_forward(x1_d, g1_d, b1_d, eps, stream);
+    LayerNormResults out2 = layernorm_forward(x2_d, g2_d, b2_d, eps, stream);
 
-    LayerNormGrads grads2 = layernorm_backward(dY2_d, out2.ctx, true, true, true, &stream);
-    LayerNormGrads grads1 = layernorm_backward(dY1_d, out1.ctx, true, true, true, &stream);
+    LayerNormGrads grads2 = layernorm_backward(dY2_d, out2.ctx, true, true, true, stream);
+    LayerNormGrads grads1 = layernorm_backward(dY1_d, out1.ctx, true, true, true, stream);
 
     stream.synchronize();
 
@@ -1182,15 +1182,15 @@ TEST(LayerNormForwardBackward, SweepAllCasesNoMidTransfer) {
             Tensor dY1_d = MakeCpuTensor2D(c.m, c.n, dY1).clone(Device::CUDA, stream);
             Tensor dY2_d = MakeCpuTensor2D(c.m, c.n, dY2).clone(Device::CUDA, stream);
 
-            LayerNormResults out1 = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-            LayerNormGrads g1 = layernorm_backward(dY1_d, out1.ctx, true, true, true, &stream);
+            LayerNormResults out1 = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+            LayerNormGrads g1 = layernorm_backward(dY1_d, out1.ctx, true, true, true, stream);
 
             ApplyAffineInplaceF32(x_d, 0.5f, 0.125f, stream);
             ApplyAffineInplaceF32(gamma_d, -0.75f, 0.25f, stream);
             ApplyAffineInplaceF32(beta_d, 0.9f, -0.05f, stream);
 
-            LayerNormResults out2 = layernorm_forward(x_d, gamma_d, beta_d, eps, &stream);
-            LayerNormGrads g2 = layernorm_backward(dY2_d, out2.ctx, true, true, true, &stream);
+            LayerNormResults out2 = layernorm_forward(x_d, gamma_d, beta_d, eps, stream);
+            LayerNormGrads g2 = layernorm_backward(dY2_d, out2.ctx, true, true, true, stream);
 
             stream.synchronize();
 

@@ -83,11 +83,8 @@ __global__ void softmax_backward_kernel(const float* __restrict__ dY, const floa
 }
 
 
-Tensor softmax_forward(const Tensor& X, Stream* stream) {
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_softmax.cu: Softmax_forward");
+Tensor softmax_forward(const Tensor& X, Stream& stream) {
+    assert_non_default_stream(stream.s, "ops_softmax.cu: Softmax_forward");
     if (X.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Only float32 tensors are supported.");
     }
@@ -101,19 +98,16 @@ Tensor softmax_forward(const Tensor& X, Stream* stream) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Input dimensions must be greater than zero.");
     }
 
-    Tensor Y = Tensor::empty(X.shape_, X.dtype_, X.device_, *stream);
+    Tensor Y = Tensor::empty(X.shape_, X.dtype_, X.device_, stream);
 
     constexpr int BLOCK_SIZE = 256;
-    softmax_forward_kernel<BLOCK_SIZE><<<m, BLOCK_SIZE, 0, stream->s>>>(static_cast<const float*>(X.data_), static_cast<float*>(Y.data_), m, n);
+    softmax_forward_kernel<BLOCK_SIZE><<<m, BLOCK_SIZE, 0, stream.s>>>(static_cast<const float*>(X.data_), static_cast<float*>(Y.data_), m, n);
 
     return std::move(Y);
 }
 
-SoftmaxGrads softmax_backward(const Tensor& dY, const Tensor& Y, Stream* stream) {
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_softmax.cu: Softmax_backward");
+SoftmaxGrads softmax_backward(const Tensor& dY, const Tensor& Y, Stream& stream) {
+    assert_non_default_stream(stream.s, "ops_softmax.cu: Softmax_backward");
     if (dY.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Only float32 tensors are supported.");
     }
@@ -139,9 +133,9 @@ SoftmaxGrads softmax_backward(const Tensor& dY, const Tensor& Y, Stream* stream)
         throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Y dimensions must be greater than zero.");
     }
 
-    Tensor dX = Tensor::empty(Y.shape_, Y.dtype_, Y.device_, *stream);
+    Tensor dX = Tensor::empty(Y.shape_, Y.dtype_, Y.device_, stream);
     constexpr int BLOCK_SIZE = 256;
-    softmax_backward_kernel<BLOCK_SIZE><<<m, BLOCK_SIZE, 0, stream->s>>>(static_cast<const float*>(dY.data_), static_cast<const float*>(Y.data_), static_cast<float*>(dX.data_), m, n);
+    softmax_backward_kernel<BLOCK_SIZE><<<m, BLOCK_SIZE, 0, stream.s>>>(static_cast<const float*>(dY.data_), static_cast<const float*>(Y.data_), static_cast<float*>(dX.data_), m, n);
 
     return SoftmaxGrads{std::move(dX)};
 }
@@ -210,11 +204,8 @@ __global__ void softmax_cross_entropy_backward_kernel(
     dX[idx] = grad / static_cast<float>(m);
 }
 
-SoftmaxCrossEntropyResults softmax_cross_entropy_forward(const Tensor& logits, const Tensor& labels, Stream* stream) {
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_softmax.cu: SoftmaxCrossEntropy_forward");
+SoftmaxCrossEntropyResults softmax_cross_entropy_forward(const Tensor& logits, const Tensor& labels, Stream& stream) {
+    assert_non_default_stream(stream.s, "ops_softmax.cu: SoftmaxCrossEntropy_forward");
     if (logits.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: logits must be float32.");
     }
@@ -240,11 +231,11 @@ SoftmaxCrossEntropyResults softmax_cross_entropy_forward(const Tensor& logits, c
         throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: labels length must match logits batch dimension.");
     }
 
-    Tensor probs = Tensor::empty(logits.shape_, logits.dtype_, logits.device_, *stream);
-    Tensor loss = Tensor::zeros({1}, logits.dtype_, logits.device_, *stream);
+    Tensor probs = Tensor::empty(logits.shape_, logits.dtype_, logits.device_, stream);
+    Tensor loss = Tensor::zeros({1}, logits.dtype_, logits.device_, stream);
 
     constexpr int BLOCK_SIZE = 256;
-    softmax_cross_entropy_forward_kernel<BLOCK_SIZE><<<m, BLOCK_SIZE, 0, stream->s>>>(
+    softmax_cross_entropy_forward_kernel<BLOCK_SIZE><<<m, BLOCK_SIZE, 0, stream.s>>>(
         static_cast<const float*>(logits.data_),
         static_cast<const int32_t*>(labels.data_),
         static_cast<float*>(probs.data_),
@@ -258,11 +249,8 @@ SoftmaxCrossEntropyResults softmax_cross_entropy_forward(const Tensor& logits, c
     };
 }
 
-SoftmaxCrossEntropyGrads softmax_cross_entropy_backward(const SoftmaxCrossEntropyCtx& ctx, Stream* stream) {
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_softmax.cu: SoftmaxCrossEntropy_backward");
+SoftmaxCrossEntropyGrads softmax_cross_entropy_backward(const SoftmaxCrossEntropyCtx& ctx, Stream& stream) {
+    assert_non_default_stream(stream.s, "ops_softmax.cu: SoftmaxCrossEntropy_backward");
     if (ctx.labels == nullptr) {
         throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: ctx.labels cannot be null.");
     }
@@ -295,12 +283,12 @@ SoftmaxCrossEntropyGrads softmax_cross_entropy_backward(const SoftmaxCrossEntrop
         throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: labels length must match context batch dimension.");
     }
 
-    Tensor dX = Tensor::empty(probs.shape_, probs.dtype_, probs.device_, *stream);
+    Tensor dX = Tensor::empty(probs.shape_, probs.dtype_, probs.device_, stream);
 
     constexpr int BLOCK_SIZE = 256;
     const int64_t total = ctx.m * ctx.n;
     const int grid = static_cast<int>((total + BLOCK_SIZE - 1) / BLOCK_SIZE);
-    softmax_cross_entropy_backward_kernel<BLOCK_SIZE><<<grid, BLOCK_SIZE, 0, stream->s>>>(
+    softmax_cross_entropy_backward_kernel<BLOCK_SIZE><<<grid, BLOCK_SIZE, 0, stream.s>>>(
         static_cast<const float*>(probs.data_),
         static_cast<const int32_t*>(labels.data_),
         static_cast<float*>(dX.data_),

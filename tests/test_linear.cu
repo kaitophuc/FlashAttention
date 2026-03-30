@@ -58,7 +58,7 @@ std::vector<float> RunForwardToHost(const Tensor& x_h,
         b_d_ptr = &b_d.value();
     }
 
-    LinearResults out = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
+    LinearResults out = linear_forward(x_d, w_d, b_d_ptr, stream, handle);
     Tensor y_h = out.Y.clone(Device::CPU);
     stream.synchronize();
 
@@ -141,12 +141,12 @@ TEST(LinearBackward, MatchesReferenceAllGradsOddN) {
     Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
     Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
 
-    LinearResults out = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearResults out = linear_forward(x_d, w_d, &b_d, stream, handle);
 
     Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, true, &stream, handle);
+    LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, true, stream, handle);
     ASSERT_TRUE(grads.has_dX);
     ASSERT_TRUE(grads.has_dW);
     ASSERT_TRUE(grads.has_db);
@@ -190,12 +190,12 @@ TEST(LinearBackward, NeedsDbIgnoredWhenForwardHadNoBias) {
     CublasHandle handle;
     Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
     Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
-    LinearResults out = linear_forward(x_d, w_d, nullptr, &stream, handle);
+    LinearResults out = linear_forward(x_d, w_d, nullptr, stream, handle);
 
     Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    LinearGrads grads = linear_backward(dY_d, out.ctx, false, false, true, &stream, handle);
+    LinearGrads grads = linear_backward(dY_d, out.ctx, false, false, true, stream, handle);
     EXPECT_FALSE(grads.has_dX);
     EXPECT_FALSE(grads.has_dW);
     EXPECT_FALSE(grads.has_db);
@@ -214,10 +214,10 @@ TEST(LinearBackward, RejectsDYShapeMismatch) {
 
     Tensor x({5, 4}, DType::F32, Device::CUDA, stream);
     Tensor w({3, 4}, DType::F32, Device::CUDA, stream);
-    LinearResults out = linear_forward(x, w, nullptr, &stream, handle);
+    LinearResults out = linear_forward(x, w, nullptr, stream, handle);
 
     Tensor dY_bad({6, 3}, DType::F32, Device::CUDA, stream);
-    EXPECT_THROW((void)linear_backward(dY_bad, out.ctx, true, true, false, &stream, handle),
+    EXPECT_THROW((void)linear_backward(dY_bad, out.ctx, true, true, false, stream, handle),
                  std::invalid_argument);
 }
 
@@ -245,7 +245,7 @@ TEST(LinearForwardBackward, DemoForwardBackwardCtxStoresXWByPointer) {
     Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
     Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
 
-    LinearResults out = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearResults out = linear_forward(x_d, w_d, &b_d, stream, handle);
     ASSERT_EQ(out.ctx.X, &x_d);
     ASSERT_EQ(out.ctx.W, &w_d);
     ASSERT_TRUE(out.ctx.has_bias);
@@ -256,7 +256,7 @@ TEST(LinearForwardBackward, DemoForwardBackwardCtxStoresXWByPointer) {
     Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-    LinearGrads grads_before = linear_backward(dY_d, out.ctx, true, true, false, &stream, handle);
+    LinearGrads grads_before = linear_backward(dY_d, out.ctx, true, true, false, stream, handle);
     ASSERT_TRUE(grads_before.dX.has_value());
     ASSERT_TRUE(grads_before.dW.has_value());
 
@@ -282,7 +282,7 @@ TEST(LinearForwardBackward, DemoForwardBackwardCtxStoresXWByPointer) {
     x_d.copy_from(x2_h, stream);
     w_d.copy_from(w2_h, stream);
 
-    LinearGrads grads_after = linear_backward(dY_d, out.ctx, true, true, false, &stream, handle);
+    LinearGrads grads_after = linear_backward(dY_d, out.ctx, true, true, false, stream, handle);
     ASSERT_TRUE(grads_after.dX.has_value());
     ASSERT_TRUE(grads_after.dW.has_value());
 
@@ -326,8 +326,8 @@ TEST(LinearForwardBackward, TwoStageReuseNoMidTransfer) {
     Tensor dY2_d = MakeCpuTensor2D(m, n, dY2_ref).clone(Device::CUDA, stream);
 
     // Stage 1 entirely on device.
-    LinearResults out1 = linear_forward(x_d, w_d, &b_d, &stream, handle);
-    LinearGrads g1 = linear_backward(dY1_d, out1.ctx, true, true, true, &stream, handle);
+    LinearResults out1 = linear_forward(x_d, w_d, &b_d, stream, handle);
+    LinearGrads g1 = linear_backward(dY1_d, out1.ctx, true, true, true, stream, handle);
     ASSERT_TRUE(g1.dX.has_value());
     ASSERT_TRUE(g1.dW.has_value());
     ASSERT_TRUE(g1.db.has_value());
@@ -338,8 +338,8 @@ TEST(LinearForwardBackward, TwoStageReuseNoMidTransfer) {
     ApplyAffineInplaceF32(b_d, 0.9f, -0.05f, stream);
 
     // Stage 2 entirely on device.
-    LinearResults out2 = linear_forward(x_d, w_d, &b_d, &stream, handle);
-    LinearGrads g2 = linear_backward(dY2_d, out2.ctx, true, true, true, &stream, handle);
+    LinearResults out2 = linear_forward(x_d, w_d, &b_d, stream, handle);
+    LinearGrads g2 = linear_backward(dY2_d, out2.ctx, true, true, true, stream, handle);
     ASSERT_TRUE(g2.dX.has_value());
     ASSERT_TRUE(g2.dW.has_value());
     ASSERT_TRUE(g2.db.has_value());
@@ -408,12 +408,12 @@ TEST(LinearForwardBackward, CtxIsolationAcrossMultipleForwardsNoMidTransfer) {
     Tensor dYa_d = MakeCpuTensor2D(m1, n1, dYa_ref).clone(Device::CUDA, stream);
     Tensor dYb_d = MakeCpuTensor2D(m2, n2, dYb_ref).clone(Device::CUDA, stream);
 
-    LinearResults out_a = linear_forward(xa_d, wa_d, &ba_d, &stream, handle);
-    LinearResults out_b = linear_forward(xb_d, wb_d, nullptr, &stream, handle);
+    LinearResults out_a = linear_forward(xa_d, wa_d, &ba_d, stream, handle);
+    LinearResults out_b = linear_forward(xb_d, wb_d, nullptr, stream, handle);
 
     // Backward in reverse order to stress ctx isolation.
-    LinearGrads gb = linear_backward(dYb_d, out_b.ctx, true, true, true, &stream, handle);
-    LinearGrads ga = linear_backward(dYa_d, out_a.ctx, true, true, true, &stream, handle);
+    LinearGrads gb = linear_backward(dYb_d, out_b.ctx, true, true, true, stream, handle);
+    LinearGrads ga = linear_backward(dYa_d, out_a.ctx, true, true, true, stream, handle);
     ASSERT_TRUE(gb.dX.has_value());
     ASSERT_TRUE(gb.dW.has_value());
     ASSERT_FALSE(gb.db.has_value());
@@ -478,8 +478,8 @@ TEST(LinearForwardBackward, SweepAllCasesNoMidTransfer) {
             Tensor dY2_d = MakeCpuTensor2D(c.m, c.n, dY2_ref).clone(Device::CUDA, stream);
 
             // Stage 1 entirely on device.
-            LinearResults out1 = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
-            LinearGrads g1 = linear_backward(dY1_d, out1.ctx, true, true, c.with_bias, &stream, handle);
+            LinearResults out1 = linear_forward(x_d, w_d, b_d_ptr, stream, handle);
+            LinearGrads g1 = linear_backward(dY1_d, out1.ctx, true, true, c.with_bias, stream, handle);
             ASSERT_TRUE(g1.dX.has_value());
             ASSERT_TRUE(g1.dW.has_value());
             if (c.with_bias) {
@@ -496,8 +496,8 @@ TEST(LinearForwardBackward, SweepAllCasesNoMidTransfer) {
             }
 
             // Stage 2 entirely on device.
-            LinearResults out2 = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
-            LinearGrads g2 = linear_backward(dY2_d, out2.ctx, true, true, c.with_bias, &stream, handle);
+            LinearResults out2 = linear_forward(x_d, w_d, b_d_ptr, stream, handle);
+            LinearGrads g2 = linear_backward(dY2_d, out2.ctx, true, true, c.with_bias, stream, handle);
             ASSERT_TRUE(g2.dX.has_value());
             ASSERT_TRUE(g2.dW.has_value());
             if (c.with_bias) {
@@ -625,19 +625,19 @@ TEST(LinearForwardBackward, MegaCoverageMatrixNoMidTransfer) {
     Tensor dY_zero_d = MakeCpuTensor2D(m, n, dY_zero_ref).clone(Device::CUDA, stream);
 
     // Forward with and without bias from the same X/W.
-    LinearResults out_bias = linear_forward(x_d, w_d, &b_d, &stream, handle);
-    LinearResults out_no_bias = linear_forward(x_d, w_d, nullptr, &stream, handle);
+    LinearResults out_bias = linear_forward(x_d, w_d, &b_d, stream, handle);
+    LinearResults out_no_bias = linear_forward(x_d, w_d, nullptr, stream, handle);
 
     // Backward matrix over flag combinations.
-    LinearGrads g_all = linear_backward(dY_rand_d, out_bias.ctx, true, true, true, &stream, handle);
-    LinearGrads g_all_rep = linear_backward(dY_rand_d, out_bias.ctx, true, true, true, &stream, handle);
-    LinearGrads g_dx_only = linear_backward(dY_rand_d, out_bias.ctx, true, false, false, &stream, handle);
-    LinearGrads g_dw_only = linear_backward(dY_rand_d, out_bias.ctx, false, true, false, &stream, handle);
-    LinearGrads g_db_only = linear_backward(dY_rand_d, out_bias.ctx, false, false, true, &stream, handle);
-    LinearGrads g_none = linear_backward(dY_rand_d, out_bias.ctx, false, false, false, &stream, handle);
-    LinearGrads g_no_bias_needs_db = linear_backward(dY_rand_d, out_no_bias.ctx, false, false, true, &stream, handle);
-    LinearGrads g_no_bias_all = linear_backward(dY_rand_d, out_no_bias.ctx, true, true, true, &stream, handle);
-    LinearGrads g_zero = linear_backward(dY_zero_d, out_bias.ctx, true, true, true, &stream, handle);
+    LinearGrads g_all = linear_backward(dY_rand_d, out_bias.ctx, true, true, true, stream, handle);
+    LinearGrads g_all_rep = linear_backward(dY_rand_d, out_bias.ctx, true, true, true, stream, handle);
+    LinearGrads g_dx_only = linear_backward(dY_rand_d, out_bias.ctx, true, false, false, stream, handle);
+    LinearGrads g_dw_only = linear_backward(dY_rand_d, out_bias.ctx, false, true, false, stream, handle);
+    LinearGrads g_db_only = linear_backward(dY_rand_d, out_bias.ctx, false, false, true, stream, handle);
+    LinearGrads g_none = linear_backward(dY_rand_d, out_bias.ctx, false, false, false, stream, handle);
+    LinearGrads g_no_bias_needs_db = linear_backward(dY_rand_d, out_no_bias.ctx, false, false, true, stream, handle);
+    LinearGrads g_no_bias_all = linear_backward(dY_rand_d, out_no_bias.ctx, true, true, true, stream, handle);
+    LinearGrads g_zero = linear_backward(dY_zero_d, out_bias.ctx, true, true, true, stream, handle);
 
     // Flag/presence checks.
     ASSERT_TRUE(g_all.dX.has_value());
@@ -755,11 +755,10 @@ TEST(LinearBackward, RejectsNullStream) {
     CublasHandle handle;
     Tensor x({5, 4}, DType::F32, Device::CUDA, stream);
     Tensor w({3, 4}, DType::F32, Device::CUDA, stream);
-    LinearResults out = linear_forward(x, w, nullptr, &stream, handle);
+    LinearResults out = linear_forward(x, w, nullptr, stream, handle);
     Tensor dY({5, 3}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_backward(dY, out.ctx, true, true, false, nullptr, handle),
-                 std::invalid_argument);
+    EXPECT_NO_THROW((void)linear_backward(dY, out.ctx, true, true, false));
 }
 
 TEST(LinearBackward, RejectsNonDefaultStream) {
@@ -771,7 +770,7 @@ TEST(LinearBackward, RejectsNonDefaultStream) {
     CublasHandle handle;
     Tensor x({5, 4}, DType::F32, Device::CUDA, stream);
     Tensor w({3, 4}, DType::F32, Device::CUDA, stream);
-    LinearResults out = linear_forward(x, w, nullptr, &stream, handle);
+    LinearResults out = linear_forward(x, w, nullptr, stream, handle);
     Tensor dY({5, 3}, DType::F32, Device::CUDA, stream);
 
     cudaStream_t raw_non_default = nullptr;
@@ -780,7 +779,7 @@ TEST(LinearBackward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_NO_THROW((void)linear_backward(dY, out.ctx, true, true, false, &non_default_stream, handle));
+    EXPECT_NO_THROW((void)linear_backward(dY, out.ctx, true, true, false, non_default_stream, handle));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
@@ -795,7 +794,7 @@ TEST(LinearBackward, RejectsNullCtxPointers) {
     Tensor dY({5, 3}, DType::F32, Device::CUDA, stream);
     const LinearCtx bad_ctx{nullptr, nullptr, false, 5, 3, 4};
 
-    EXPECT_THROW((void)linear_backward(dY, bad_ctx, true, true, false, &stream, handle),
+    EXPECT_THROW((void)linear_backward(dY, bad_ctx, true, true, false, stream, handle),
                  std::invalid_argument);
 }
 
@@ -811,7 +810,7 @@ TEST(LinearBackward, RejectsNon2DDY) {
     const LinearCtx ctx{&x, &w, false, 5, 3, 4};
     Tensor dY_bad({5, 3, 2}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_backward(dY_bad, ctx, true, true, false, &stream, handle),
+    EXPECT_THROW((void)linear_backward(dY_bad, ctx, true, true, false, stream, handle),
                  std::invalid_argument);
 }
 
@@ -827,7 +826,7 @@ TEST(LinearBackward, RejectsDYDTypeNotF32) {
     const LinearCtx ctx{&x, &w, false, 5, 3, 4};
     Tensor dY_bad({5, 3}, DType::F16, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_backward(dY_bad, ctx, true, true, false, &stream, handle),
+    EXPECT_THROW((void)linear_backward(dY_bad, ctx, true, true, false, stream, handle),
                  std::invalid_argument);
 }
 
@@ -843,7 +842,7 @@ TEST(LinearBackward, RejectsDYDTypeMismatchCtx) {
     const LinearCtx ctx{&x, &w, false, 5, 3, 4};
     Tensor dY({5, 3}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_backward(dY, ctx, true, true, false, &stream, handle),
+    EXPECT_THROW((void)linear_backward(dY, ctx, true, true, false, stream, handle),
                  std::invalid_argument);
 }
 
@@ -859,7 +858,7 @@ TEST(LinearBackward, RejectsDYDeviceMismatchCtx) {
     const LinearCtx ctx{&x, &w, false, 5, 3, 4};
     Tensor dY_cpu({5, 3}, DType::F32, Device::CPU);
 
-    EXPECT_THROW((void)linear_backward(dY_cpu, ctx, true, true, false, &stream, handle),
+    EXPECT_THROW((void)linear_backward(dY_cpu, ctx, true, true, false, stream, handle),
                  std::invalid_argument);
 }
 
@@ -875,7 +874,7 @@ TEST(LinearBackward, RejectsInvalidKInCtx) {
     const LinearCtx bad_ctx{&x, &w, false, 5, 3, 0};
     Tensor dY({5, 3}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_backward(dY, bad_ctx, true, true, false, &stream, handle),
+    EXPECT_THROW((void)linear_backward(dY, bad_ctx, true, true, false, stream, handle),
                  std::invalid_argument);
 }
 
@@ -899,11 +898,11 @@ TEST(LinearBackward, NeedsDbFalseSkipsBiasGradEvenWithBias) {
     Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
     Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
     Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
-    LinearResults out = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearResults out = linear_forward(x_d, w_d, &b_d, stream, handle);
 
     Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
-    LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, false, &stream, handle);
+    LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, false, stream, handle);
 
     EXPECT_TRUE(grads.has_dX);
     EXPECT_TRUE(grads.has_dW);
@@ -933,11 +932,11 @@ TEST(LinearBackward, NeedsGradFlagsAllFalseReturnsNoGrads) {
     Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
     Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
     Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
-    LinearResults out = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearResults out = linear_forward(x_d, w_d, &b_d, stream, handle);
 
     Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
-    LinearGrads grads = linear_backward(dY_d, out.ctx, false, false, false, &stream, handle);
+    LinearGrads grads = linear_backward(dY_d, out.ctx, false, false, false, stream, handle);
 
     EXPECT_FALSE(grads.has_dX);
     EXPECT_FALSE(grads.has_dW);
@@ -969,11 +968,11 @@ TEST(LinearBackward, NeedsGradFlagsDXOnlyMatchesReference) {
     Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
     Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
     Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
-    LinearResults out = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearResults out = linear_forward(x_d, w_d, &b_d, stream, handle);
 
     Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
-    LinearGrads grads = linear_backward(dY_d, out.ctx, true, false, false, &stream, handle);
+    LinearGrads grads = linear_backward(dY_d, out.ctx, true, false, false, stream, handle);
 
     EXPECT_TRUE(grads.has_dX);
     EXPECT_FALSE(grads.has_dW);
@@ -1045,11 +1044,11 @@ TEST(LinearBackward, SweepAllCases) {
                 b_d.emplace(inputs.b_h->clone(Device::CUDA, stream));
                 b_d_ptr = &b_d.value();
             }
-            LinearResults out = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
+            LinearResults out = linear_forward(x_d, w_d, b_d_ptr, stream, handle);
 
             Tensor dY_h = MakeCpuTensor2D(c.m, c.n, dY_ref);
             Tensor dY_d = dY_h.clone(Device::CUDA, stream);
-            LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, c.with_bias, &stream, handle);
+            LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, c.with_bias, stream, handle);
             ASSERT_TRUE(grads.dX.has_value());
             ASSERT_TRUE(grads.dW.has_value());
             if (c.with_bias) {
@@ -1143,11 +1142,11 @@ TEST(LinearBackward, FiniteDifferenceGradientCheckSmallWithBias) {
     Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
     Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
 
-    LinearResults out = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearResults out = linear_forward(x_d, w_d, &b_d, stream, handle);
 
     Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
-    LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, true, &stream, handle);
+    LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, true, stream, handle);
     ASSERT_TRUE(grads.dX.has_value());
     ASSERT_TRUE(grads.dW.has_value());
     ASSERT_TRUE(grads.db.has_value());
@@ -1217,11 +1216,11 @@ TEST(LinearBackward, NeedsGradFlagsSelectiveOutputsAndValues) {
     Tensor x_d = inputs.x_h.clone(Device::CUDA, stream);
     Tensor w_d = inputs.w_h.clone(Device::CUDA, stream);
     Tensor b_d = inputs.b_h->clone(Device::CUDA, stream);
-    LinearResults out = linear_forward(x_d, w_d, &b_d, &stream, handle);
+    LinearResults out = linear_forward(x_d, w_d, &b_d, stream, handle);
 
     Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
     Tensor dY_d = dY_h.clone(Device::CUDA, stream);
-    LinearGrads grads = linear_backward(dY_d, out.ctx, false, true, true, &stream, handle);
+    LinearGrads grads = linear_backward(dY_d, out.ctx, false, true, true, stream, handle);
 
     EXPECT_FALSE(grads.has_dX);
     EXPECT_TRUE(grads.has_dW);
@@ -1277,11 +1276,11 @@ TEST(LinearBackward, SingleStreamOrderingReuseStressFixedShape) {
             b_d_ptr = &b_d.value();
         }
 
-        LinearResults out = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
+        LinearResults out = linear_forward(x_d, w_d, b_d_ptr, stream, handle);
         Tensor dY_h = MakeCpuTensor2D(m, n, dY_ref);
         Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-        LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, with_bias, &stream, handle);
+        LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, with_bias, stream, handle);
         ASSERT_TRUE(grads.dX.has_value());
         ASSERT_TRUE(grads.dW.has_value());
         if (with_bias) {
@@ -1353,11 +1352,11 @@ TEST(LinearBackward, SingleStreamOrderingReuseStressShapeCycleABC) {
             b_d_ptr = &b_d.value();
         }
 
-        LinearResults out = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
+        LinearResults out = linear_forward(x_d, w_d, b_d_ptr, stream, handle);
         Tensor dY_h = MakeCpuTensor2D(c.m, c.n, dY_ref);
         Tensor dY_d = dY_h.clone(Device::CUDA, stream);
 
-        LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, c.with_bias, &stream, handle);
+        LinearGrads grads = linear_backward(dY_d, out.ctx, true, true, c.with_bias, stream, handle);
         ASSERT_TRUE(grads.dX.has_value());
         ASSERT_TRUE(grads.dW.has_value());
         if (c.with_bias) {
@@ -1403,7 +1402,7 @@ TEST(LinearForward, RejectsNon2DX) {
     Tensor x({20, 30, 40}, DType::F32, Device::CUDA, stream);
     Tensor w({50, 40}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_forward(x, w, nullptr, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, nullptr, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsNon2DW) {
@@ -1415,7 +1414,7 @@ TEST(LinearForward, RejectsNon2DW) {
     Tensor x({20, 30}, DType::F32, Device::CUDA, stream);
     Tensor w({40, 30, 2}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_forward(x, w, nullptr, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, nullptr, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsKMismatch) {
@@ -1427,7 +1426,7 @@ TEST(LinearForward, RejectsKMismatch) {
     Tensor x({20, 30}, DType::F32, Device::CUDA, stream);
     Tensor w({40, 50}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_forward(x, w, nullptr, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, nullptr, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsBiasShapeMismatch) {
@@ -1440,7 +1439,7 @@ TEST(LinearForward, RejectsBiasShapeMismatch) {
     Tensor w({40, 30}, DType::F32, Device::CUDA, stream);
     Tensor b_bad({50}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_forward(x, w, &b_bad, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, &b_bad, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsNon1DBias) {
@@ -1453,7 +1452,7 @@ TEST(LinearForward, RejectsNon1DBias) {
     Tensor w({40, 30}, DType::F32, Device::CUDA, stream);
     Tensor b_bad({40, 1}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_forward(x, w, &b_bad, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, &b_bad, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsDTypeMismatchXW) {
@@ -1465,7 +1464,7 @@ TEST(LinearForward, RejectsDTypeMismatchXW) {
     Tensor x({20, 30}, DType::F32, Device::CUDA, stream);
     Tensor w({40, 30}, DType::F16, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_forward(x, w, nullptr, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, nullptr, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsDTypeMismatchBias) {
@@ -1478,7 +1477,7 @@ TEST(LinearForward, RejectsDTypeMismatchBias) {
     Tensor w({40, 30}, DType::F32, Device::CUDA, stream);
     Tensor b_bad({40}, DType::F16, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_forward(x, w, &b_bad, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, &b_bad, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsDeviceMismatchXW) {
@@ -1490,7 +1489,7 @@ TEST(LinearForward, RejectsDeviceMismatchXW) {
     Tensor x({20, 30}, DType::F32, Device::CUDA, stream);
     Tensor w({40, 30}, DType::F32, Device::CPU);
 
-    EXPECT_THROW((void)linear_forward(x, w, nullptr, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, nullptr, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsDeviceMismatchBias) {
@@ -1503,7 +1502,7 @@ TEST(LinearForward, RejectsDeviceMismatchBias) {
     Tensor w({40, 30}, DType::F32, Device::CUDA, stream);
     Tensor b_bad({40}, DType::F32, Device::CPU);
 
-    EXPECT_THROW((void)linear_forward(x, w, &b_bad, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, &b_bad, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsCPUOnlyInputsForNow) {
@@ -1515,7 +1514,7 @@ TEST(LinearForward, RejectsCPUOnlyInputsForNow) {
     Tensor x({20, 30}, DType::F32, Device::CPU);
     Tensor w({40, 30}, DType::F32, Device::CPU);
 
-    EXPECT_THROW((void)linear_forward(x, w, nullptr, &stream, handle), std::invalid_argument);
+    EXPECT_THROW((void)linear_forward(x, w, nullptr, stream, handle), std::invalid_argument);
 }
 
 TEST(LinearForward, RejectsNullStream) {
@@ -1527,7 +1526,7 @@ TEST(LinearForward, RejectsNullStream) {
     Tensor x({20, 30}, DType::F32, Device::CUDA, stream);
     Tensor w({40, 30}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_THROW((void)linear_forward(x, w, nullptr, nullptr, handle), std::invalid_argument);
+    EXPECT_NO_THROW((void)linear_forward(x, w, nullptr));
 }
 
 TEST(LinearForward, RejectsNonDefaultStream) {
@@ -1545,7 +1544,7 @@ TEST(LinearForward, RejectsNonDefaultStream) {
     Stream non_default_stream;
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
-    EXPECT_NO_THROW((void)linear_forward(x, w, nullptr, &non_default_stream, handle));
+    EXPECT_NO_THROW((void)linear_forward(x, w, nullptr, non_default_stream, handle));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
@@ -1559,7 +1558,7 @@ TEST(LinearForward, AcceptsDefaultStream) {
     Tensor x({4, 8}, DType::F32, Device::CUDA, stream);
     Tensor w({16, 8}, DType::F32, Device::CUDA, stream);
 
-    EXPECT_NO_THROW((void)linear_forward(x, w, nullptr, &stream, handle));
+    EXPECT_NO_THROW((void)linear_forward(x, w, nullptr, stream, handle));
 }
 
 TEST(LinearForward, SweepAllCases) {
@@ -1590,7 +1589,7 @@ TEST(LinearForward, SweepAllCases) {
                 b_d_ptr = &b_d.value();
             }
 
-            LinearResults out = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
+            LinearResults out = linear_forward(x_d, w_d, b_d_ptr, stream, handle);
             Tensor y_h = out.Y.clone(Device::CPU);
             stream.synchronize();
 
@@ -1898,7 +1897,7 @@ TEST(LinearForward, SingleStreamOrderingReuseStressFixedShape) {
             b_d_ptr = &b_d.value();
         }
 
-        LinearResults out = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
+        LinearResults out = linear_forward(x_d, w_d, b_d_ptr, stream, handle);
         Tensor y_h = out.Y.clone(Device::CPU);
 
         const std::vector<float>* b_ref = with_bias ? &inputs.b_ref : nullptr;
@@ -1954,7 +1953,7 @@ TEST(LinearForward, SingleStreamOrderingReuseStressShapeCycleABC) {
             b_d.emplace(inputs.b_h->clone(Device::CUDA, stream));
             b_d_ptr = &b_d.value();
         }
-        LinearResults out = linear_forward(x_d, w_d, b_d_ptr, &stream, handle);
+        LinearResults out = linear_forward(x_d, w_d, b_d_ptr, stream, handle);
         Tensor y_h = out.Y.clone(Device::CPU);
 
         const std::vector<float>* b_ref = c.with_bias ? &inputs.b_ref : nullptr;

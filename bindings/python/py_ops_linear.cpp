@@ -12,7 +12,7 @@ std::pair<std::shared_ptr<Tensor>, LinearContextPy> linear_forward_py(
 
     const Tensor* b_ptr = b ? b.get() : nullptr;
     Stream stream = py_current_stream();
-    LinearResults out = linear_forward(*x, *w, b_ptr, &stream, py_default_cublas_handle());
+    LinearResults out = linear_forward(*x, *w, b_ptr, stream, py_default_cublas_handle());
 
     LinearContextPy ctx;
     ctx.ctx = out.ctx;
@@ -35,7 +35,7 @@ LinearGradsPy linear_backward_py(
     }
 
     Stream stream = py_current_stream();
-    LinearGrads grads = linear_backward(*dY, ctx.ctx, needs_dX, needs_dW, needs_db, &stream, py_default_cublas_handle());
+    LinearGrads grads = linear_backward(*dY, ctx.ctx, needs_dX, needs_dW, needs_db, stream, py_default_cublas_handle());
 
     LinearGradsPy out;
     out.dX = optional_tensor_to_shared(std::move(grads.dX));

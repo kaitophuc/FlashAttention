@@ -9,7 +9,7 @@ std::shared_ptr<Tensor> classification_correct_count_py(const std::shared_ptr<Te
     }
 
     Stream stream = py_current_stream();
-    Tensor out = classification_correct_count(*logits, *labels, &stream);
+    Tensor out = classification_correct_count(*logits, *labels, stream);
     return make_tensor_shared(std::move(out));
 }
 

@@ -19,11 +19,8 @@ __global__ void sgd_update_kernel(float* __restrict__ param,
 
 }  // namespace
 
-void sgd_update_(Tensor& param, const Tensor& grad, float lr, Stream* stream) {
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_optimizer.cu: sgd_update_: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_optimizer.cu: sgd_update_");
+void sgd_update_(Tensor& param, const Tensor& grad, float lr, Stream& stream) {
+    assert_non_default_stream(stream.s, "ops_optimizer.cu: sgd_update_");
     if (!std::isfinite(lr)) {
         throw std::invalid_argument("ops_optimizer.cu: sgd_update_: lr must be finite.");
     }
@@ -44,7 +41,7 @@ void sgd_update_(Tensor& param, const Tensor& grad, float lr, Stream* stream) {
 
     constexpr int kBlockSize = 256;
     const int grid = static_cast<int>((numel + kBlockSize - 1) / kBlockSize);
-    sgd_update_kernel<kBlockSize><<<grid, kBlockSize, 0, stream->s>>>(
+    sgd_update_kernel<kBlockSize><<<grid, kBlockSize, 0, stream.s>>>(
         static_cast<float*>(param.data_),
         static_cast<const float*>(grad.data_),
         numel,

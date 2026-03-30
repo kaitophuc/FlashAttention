@@ -52,14 +52,11 @@ __global__ void compute_db_kernel(const float* __restrict__ dY,
 
 // Using cublasLt for better performance and to leverage epilogue fusion for bias addition when available.
 /*
-LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream* stream, CublasHandle& handle) {
+LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream& stream, CublasHandle& handle) {
     // Check input shapes and dtypes.
     // At this phase, assume all tensors are in Float32 for simplicity. In a full implementation, we would handle different dtypes and possibly mixed precision.
     // currently disable CPU support, so we can assume all tensors are on CUDA device.
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_linear.cu: Linear_forward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_linear.cu: Linear_forward");
+    assert_non_default_stream(stream.s, "ops_linear.cu: Linear_forward");
     if (X.dtype_ != DType::F32 || W.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_linear.cu: Linear_forward: Only float32 tensors are supported.");
     }
@@ -92,7 +89,7 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
 
     // Create output tensor Y.
     std::vector<int64_t> y_shape = {X.shape_[0], W.shape_[0]};
-    Tensor Y = Tensor::empty(y_shape, X.dtype_, X.device_, *stream);
+    Tensor Y = Tensor::empty(y_shape, X.dtype_, X.device_, stream);
     
     // Perform matrix multiplication Y = X * W^T.
     // Row-major Y(m x n) = X(m x k) * W(n x k)^T mapped to column-major:
@@ -124,21 +121,18 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
 
         int grid = (total_elements + block - 1) / block;
 
-        add_bias<<<grid, block, 0, stream->s>>>(static_cast<float*>(Y.data_), static_cast<const float*>(b->data_), m, n);
+        add_bias<<<grid, block, 0, stream.s>>>(static_cast<float*>(Y.data_), static_cast<const float*>(b->data_), m, n);
     }
     return LinearResults{std::move(Y), LinearCtx{&X, &W, b != nullptr, X.shape_[0], W.shape_[0], X.shape_[1]}};
 }
 */
 
 
-LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream* stream, CublasHandle& handle) {
+LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, Stream& stream, CublasHandle& handle) {
     // Check input shapes and dtypes.
     // At this phase, assume all tensors are in Float32 for simplicity. In a full implementation, we would handle different dtypes and possibly mixed precision.
     // currently disable CPU support, so we can assume all tensors are on CUDA device.
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_linear.cu: Linear_forward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_linear.cu: Linear_forward");
+    assert_non_default_stream(stream.s, "ops_linear.cu: Linear_forward");
     if (X.dtype_ != DType::F32 || W.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_linear.cu: Linear_forward: Only float32 tensors are supported.");
     }
@@ -173,11 +167,11 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
     const int64_t m = X.shape_[0];
     const int64_t n = W.shape_[0];
     const int64_t k = X.shape_[1];
-    Tensor Y = Tensor::empty({m, n}, X.dtype_, X.device_, *stream);
+    Tensor Y = Tensor::empty({m, n}, X.dtype_, X.device_, stream);
 
     cublasLtMatmulDesc_t operation_desc;
     CUBLAS_CHECK(cublasLtMatmulDescCreate(&operation_desc, CUBLAS_COMPUTE_32F, CUDA_R_32F));
-    CUBLAS_CHECK(cublasSetStream(handle.get(), stream->s));
+    CUBLAS_CHECK(cublasSetStream(handle.get(), stream.s));
     
     // Perform matrix multiplication Y = X * W^T.
     // Map row-major tensors into column-major descriptors:
@@ -202,7 +196,7 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
     CUBLAS_CHECK(cublasLtMatrixLayoutCreate(&D_desc, CUDA_R_32F, n, m, n)); // Y as col-major [n, m]
 
     const size_t workspace_size = 1 << 22; // 4 MiB workspace for cublasLt (tuning may be needed for larger matrices)
-    void* workspace = allocate_device(workspace_size, *stream);
+    void* workspace = allocate_device(workspace_size, stream);
 
     cublasLtMatmulPreference_t pref;
     CUBLAS_CHECK(cublasLtMatmulPreferenceCreate(&pref));
@@ -222,7 +216,7 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
         &heuristic_count));
 
     if (heuristic_count == 0) {
-        deallocate_device(workspace, *stream);
+        deallocate_device(workspace, stream);
         CUBLAS_CHECK(cublasLtMatmulPreferenceDestroy(pref));
         CUBLAS_CHECK(cublasLtMatmulDescDestroy(operation_desc));
         CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(A_desc));
@@ -244,9 +238,9 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
         Y.data_, D_desc,
         &heuristic_result.algo,
         workspace, workspace_size,
-        stream->s));
+        stream.s));
 
-    deallocate_device(workspace, *stream);
+    deallocate_device(workspace, stream);
     CUBLAS_CHECK(cublasLtMatmulPreferenceDestroy(pref));
     CUBLAS_CHECK(cublasLtMatmulDescDestroy(operation_desc));
     CUBLAS_CHECK(cublasLtMatrixLayoutDestroy(A_desc));
@@ -257,12 +251,9 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
     return LinearResults{std::move(Y), LinearCtx{&X, &W, b != nullptr, X.shape_[0], W.shape_[0], X.shape_[1]}};
 }
 
-LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_dX, bool needs_dW, bool needs_db, Stream* stream, CublasHandle& handle) {
+LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_dX, bool needs_dW, bool needs_db, Stream& stream, CublasHandle& handle) {
     // Check input shapes and dtypes.
-    if (stream == nullptr) {
-        throw std::invalid_argument("ops_linear.cu: Linear_backward: Stream pointer cannot be null.");
-    }
-    assert_non_default_stream(stream->s, "ops_linear.cu: Linear_backward");
+    assert_non_default_stream(stream.s, "ops_linear.cu: Linear_backward");
     if (ctx.X == nullptr || ctx.W == nullptr) {
         throw std::invalid_argument("ops_linear.cu: Linear_backward: LinearCtx contains null tensor pointers.");
     }
@@ -290,15 +281,15 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
 
     std::optional<Tensor> dX;
     if (needs_dX) {
-        dX = Tensor::empty(ctx.X->shape_, ctx.X->dtype_, ctx.X->device_, *stream);
+        dX = Tensor::empty(ctx.X->shape_, ctx.X->dtype_, ctx.X->device_, stream);
     }
     std::optional<Tensor> dW;
     if (needs_dW) {
-        dW = Tensor::empty(ctx.W->shape_, ctx.W->dtype_, ctx.W->device_, *stream);
+        dW = Tensor::empty(ctx.W->shape_, ctx.W->dtype_, ctx.W->device_, stream);
     }
     std::optional<Tensor> db;
     if (ctx.has_bias && needs_db) {
-        db = Tensor::empty({ctx.n}, ctx.X->dtype_, ctx.X->device_, *stream);
+        db = Tensor::empty({ctx.n}, ctx.X->dtype_, ctx.X->device_, stream);
     }
 
     // Compute dX = dY * W
@@ -316,7 +307,7 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
 
         float alpha = 1.0f;
         float beta = 0.0f;
-        CUBLAS_CHECK(cublasSetStream(handle.get(), stream->s));
+        CUBLAS_CHECK(cublasSetStream(handle.get(), stream.s));
         CUBLAS_CHECK(cublasSgemm(handle.get(), opA, opB, m_out, n_out, k_out,
                                     &alpha,
                                     static_cast<const float*>(ctx.W->data_), la,
@@ -339,7 +330,7 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
         int lc = static_cast<int>(ctx.X->shape_[1]);
         float alpha = 1.0f;
         float beta = 0.0f;
-        CUBLAS_CHECK(cublasSetStream(handle.get(), stream->s));
+        CUBLAS_CHECK(cublasSetStream(handle.get(), stream.s));
         CUBLAS_CHECK(cublasSgemm(handle.get(), opA, opB, m_out, n_out, k_out,
                                     &alpha,
                                     static_cast<const float*>(ctx.X->data_), la,
@@ -363,9 +354,9 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
         int grid_y = (n + BLOCK_X - 1) / BLOCK_X;
         dim3 grid(grid_x, grid_y);
 
-        db.value().zero_(*stream); // Ensure db is zeroed before accumulation
+        db.value().zero_(stream); // Ensure db is zeroed before accumulation
 
-        compute_db_kernel<BLOCK_X, BLOCK_Y, ROWS_PER_THREAD><<<grid, block, 0, stream->s>>>(
+        compute_db_kernel<BLOCK_X, BLOCK_Y, ROWS_PER_THREAD><<<grid, block, 0, stream.s>>>(
             static_cast<const float*>(dY.data_),
             static_cast<float*>(db.value().data_),
             m,
