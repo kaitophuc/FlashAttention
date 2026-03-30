@@ -42,8 +42,44 @@ void bind_tensor(py::module_& m) {
         .def("item_int32", &tensor_item_int32,
              "Read a scalar int32 tensor value to host.")
         .def_static("empty", &tensor_empty, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA)
-        .def_static("zeros", &tensor_zeros, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA);
+        .def_static("zeros", &tensor_zeros, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA)
+        .def_static("random_uniform",
+                    &tensor_random_uniform,
+                    py::arg("shape"),
+                    py::arg("low") = -1.0f,
+                    py::arg("high") = 1.0f,
+                    py::arg("seed") = static_cast<uint64_t>(0),
+                    py::arg("dtype") = DType::F32,
+                    py::arg("device") = Device::CUDA)
+        .def_static("from_list_float",
+                    &tensor_from_list_float,
+                    py::arg("shape"),
+                    py::arg("values"),
+                    py::arg("device") = Device::CUDA)
+        .def_static("from_list_int32",
+                    &tensor_from_list_int32,
+                    py::arg("shape"),
+                    py::arg("values"),
+                    py::arg("device") = Device::CUDA);
 
     m.def("empty", &tensor_empty, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA);
     m.def("zeros", &tensor_zeros, py::arg("shape"), py::arg("dtype") = DType::F32, py::arg("device") = Device::CUDA);
+    m.def("random_uniform",
+          &tensor_random_uniform,
+          py::arg("shape"),
+          py::arg("low") = -1.0f,
+          py::arg("high") = 1.0f,
+          py::arg("seed") = static_cast<uint64_t>(0),
+          py::arg("dtype") = DType::F32,
+          py::arg("device") = Device::CUDA);
+    m.def("tensor_from_list_float",
+          &tensor_from_list_float,
+          py::arg("shape"),
+          py::arg("values"),
+          py::arg("device") = Device::CUDA);
+    m.def("tensor_from_list_int32",
+          &tensor_from_list_int32,
+          py::arg("shape"),
+          py::arg("values"),
+          py::arg("device") = Device::CUDA);
 }

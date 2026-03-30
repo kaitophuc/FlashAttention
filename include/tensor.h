@@ -167,6 +167,21 @@ struct Tensor {
         return out;
     }
 
+    static Tensor random_uniform(std::vector<int64_t> shape,
+                                 float low,
+                                 float high,
+                                 uint64_t seed,
+                                 DType dtype,
+                                 Device device,
+                                 Stream& stream);
+
+    static Tensor random_uniform(std::vector<int64_t> shape,
+                                 float low,
+                                 float high,
+                                 uint64_t seed,
+                                 DType dtype,
+                                 Device device);
+
     size_t numel() const {
         return numel_;
     }

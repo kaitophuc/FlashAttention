@@ -1,4 +1,32 @@
 #include "tensor.h"
+#include <curand_kernel.h>
+
+#include <cmath>
+
+namespace {
+
+__global__ void random_uniform_f32_kernel(float* out,
+                                          int64_t numel,
+                                          float low,
+                                          float high,
+                                          uint64_t seed) {
+    const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (idx >= numel) {
+        return;
+    }
+
+    curandStatePhilox4_32_10_t state;
+    curand_init(seed, static_cast<unsigned long long>(idx), 0ULL, &state);
+
+    // curand_uniform returns (0, 1], clamp the 1.0 edge for [low, high) behavior.
+    float u = curand_uniform(&state);
+    if (u >= 1.0f) {
+        u = 0.99999994f;
+    }
+    out[idx] = low + u * (high - low);
+}
+
+}  // namespace
 
 Tensor Tensor::matmul(const Tensor& other) const {
     if (shape_.size() != 2 || other.shape_.size() != 2) {
@@ -142,4 +170,52 @@ Tensor Tensor::matmul(const Tensor& other, Stream& stream, CublasHandle& cublas_
         throw std::runtime_error("tensor.h: cublas gemm failed with error code " + std::to_string(status));
     }
     return result;
+}
+
+Tensor Tensor::random_uniform(std::vector<int64_t> shape,
+                              float low,
+                              float high,
+                              uint64_t seed,
+                              DType dtype,
+                              Device device,
+                              Stream& stream) {
+    if (stream.s != cudaStream_t(0)) {
+        throw std::invalid_argument("tensor.h: random_uniform requires the default stream at this phase.");
+    }
+    if (dtype != DType::F32) {
+        throw std::invalid_argument("tensor.h: random_uniform currently supports only F32.");
+    }
+    if (device != Device::CUDA) {
+        throw std::invalid_argument("tensor.h: random_uniform currently supports only CUDA tensors.");
+    }
+    if (!std::isfinite(low) || !std::isfinite(high)) {
+        throw std::invalid_argument("tensor.h: random_uniform requires finite low/high.");
+    }
+    if (!(low < high)) {
+        throw std::invalid_argument("tensor.h: random_uniform requires low < high.");
+    }
+
+    Tensor out = Tensor::empty(std::move(shape), dtype, device, stream);
+    constexpr int kBlockSize = 256;
+    const int grid = static_cast<int>((out.numel_ + kBlockSize - 1) / kBlockSize);
+    random_uniform_f32_kernel<<<grid, kBlockSize, 0, stream.s>>>(
+        static_cast<float*>(out.data_),
+        static_cast<int64_t>(out.numel_),
+        low,
+        high,
+        seed);
+    return out;
+}
+
+Tensor Tensor::random_uniform(std::vector<int64_t> shape,
+                              float low,
+                              float high,
+                              uint64_t seed,
+                              DType dtype,
+                              Device device) {
+    if (device != Device::CUDA) {
+        throw std::invalid_argument("tensor.h: random_uniform currently supports only CUDA tensors.");
+    }
+    Stream current(cudaStream_t(0));
+    return random_uniform(std::move(shape), low, high, seed, dtype, device, current);
 }

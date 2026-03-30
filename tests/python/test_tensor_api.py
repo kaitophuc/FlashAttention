@@ -108,6 +108,50 @@ class TensorApiTest(unittest.TestCase):
         with self.assertRaises(Exception):
             ti.item_float()
 
+    def test_tensor_from_list_float(self):
+        t = ktorch.tensor_from_list_float([2, 2], [1.5, -2.0, 3.25, 4.0], device=ktorch.Device.CPU)
+        self.assertEqual(t.shape, [2, 2])
+        self.assertEqual(t.dtype, ktorch.DType.F32)
+        assert_allclose(t.to_list_float(), [1.5, -2.0, 3.25, 4.0])
+
+    def test_tensor_from_list_int32(self):
+        t = ktorch.tensor_from_list_int32([4], [7, -3, 11, 0], device=ktorch.Device.CPU)
+        self.assertEqual(t.shape, [4])
+        self.assertEqual(t.dtype, ktorch.DType.I32)
+        self.assertEqual(t.to_numpy_int32().tolist(), [7, -3, 11, 0])
+
+    def test_tensor_from_list_rejects_size_mismatch(self):
+        with self.assertRaises(Exception):
+            _ = ktorch.tensor_from_list_float([2, 2], [1.0, 2.0, 3.0], device=ktorch.Device.CPU)
+
+        with self.assertRaises(Exception):
+            _ = ktorch.tensor_from_list_int32([3], [1, 2], device=ktorch.Device.CPU)
+
+    def test_random_uniform_seeded_cuda(self):
+        if not cuda_available():
+            self.skipTest("CUDA unavailable")
+
+        a = ktorch.random_uniform([16], low=-0.05, high=0.05, seed=1234)
+        b = ktorch.random_uniform([16], low=-0.05, high=0.05, seed=1234)
+        c = ktorch.random_uniform([16], low=-0.05, high=0.05, seed=1235)
+
+        av = a.to_list_float()
+        bv = b.to_list_float()
+        cv = c.to_list_float()
+
+        assert_allclose(av, bv, atol=0.0, rtol=0.0)
+        self.assertNotEqual(av, cv)
+        for v in av:
+            self.assertGreaterEqual(v, -0.05)
+            self.assertLess(v, 0.05)
+
+    def test_random_uniform_rejects_invalid_args(self):
+        with self.assertRaises(Exception):
+            _ = ktorch.random_uniform([4], low=1.0, high=1.0, seed=0, device=ktorch.Device.CUDA)
+
+        with self.assertRaises(Exception):
+            _ = ktorch.random_uniform([4], low=2.0, high=-1.0, seed=0, device=ktorch.Device.CUDA)
+
 
 if __name__ == "__main__":
     unittest.main()

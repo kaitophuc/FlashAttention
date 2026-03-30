@@ -17,6 +17,18 @@ def zeros(shape, dtype=DType.F32, device=Device.CUDA):
     return _C.zeros(shape, dtype, device)
 
 
+def random_uniform(shape, low=-1.0, high=1.0, seed=0, dtype=DType.F32, device=Device.CUDA):
+    return _C.random_uniform(shape, low, high, seed, dtype, device)
+
+
+def tensor_from_list_float(shape, values, device=Device.CUDA):
+    return _C.tensor_from_list_float(shape, values, device)
+
+
+def tensor_from_list_int32(shape, values, device=Device.CUDA):
+    return _C.tensor_from_list_int32(shape, values, device)
+
+
 def default_stream() -> Stream:
     return _C.default_stream()
 

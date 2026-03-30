@@ -115,6 +115,20 @@ Expected output shape:
 - final loss should decrease,
 - prints final `inference_output` list.
 
+### 5. Run FashionMNIST manual-vs-PyTorch helpers
+
+Use the dedicated runner:
+
+```bash
+tools/ktorch/run_fashion_mnist_compare.sh --mode both --benchmark-compare --batch-size 128
+```
+
+Run only the ktorch path:
+
+```bash
+tools/ktorch/run_fashion_mnist_compare.sh --mode manual --epochs 3 --max-train-batches 200
+```
+
 ## Build Profiles
 
 ### C++ test/bench profile

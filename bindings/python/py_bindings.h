@@ -113,6 +113,18 @@ inline std::shared_ptr<Tensor> tensor_zeros(const std::vector<int64_t>& shape, D
     return make_tensor_shared(Tensor::zeros(shape, dtype, device));
 }
 
+inline std::shared_ptr<Tensor> tensor_random_uniform(const std::vector<int64_t>& shape,
+                                                     float low,
+                                                     float high,
+                                                     uint64_t seed,
+                                                     DType dtype,
+                                                     Device device) {
+    if (device == Device::CUDA) {
+        return make_tensor_shared(Tensor::random_uniform(shape, low, high, seed, dtype, device, py_default_stream()));
+    }
+    return make_tensor_shared(Tensor::random_uniform(shape, low, high, seed, dtype, device));
+}
+
 inline std::shared_ptr<Tensor> tensor_clone(const Tensor& src, Device device) {
     if (device == Device::CUDA) {
         return make_tensor_shared(src.clone(device, py_default_stream()));
@@ -138,6 +150,22 @@ inline void tensor_copy_from_list_int32(Tensor& dst, const std::vector<int32_t>&
     if (dst.device_ == Device::CUDA) {
         py_default_stream().synchronize();
     }
+}
+
+inline std::shared_ptr<Tensor> tensor_from_list_float(const std::vector<int64_t>& shape,
+                                                      const std::vector<float>& values,
+                                                      Device device) {
+    auto out = tensor_empty(shape, DType::F32, device);
+    tensor_copy_from_list_float(*out, values);
+    return out;
+}
+
+inline std::shared_ptr<Tensor> tensor_from_list_int32(const std::vector<int64_t>& shape,
+                                                      const std::vector<int32_t>& values,
+                                                      Device device) {
+    auto out = tensor_empty(shape, DType::I32, device);
+    tensor_copy_from_list_int32(*out, values);
+    return out;
 }
 
 inline std::vector<float> tensor_to_list_float(const Tensor& src) {

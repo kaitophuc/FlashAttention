@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-import random
 import statistics
 import time
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Tuple
 
 import ktorch
 from ktorch import ops
@@ -31,31 +30,26 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def set_seed(seed: int) -> None:
-    random.seed(seed)
-
-
-def random_init(rows: int, cols: int, scale: float) -> List[float]:
-    vals = []
-    for _ in range(rows * cols):
-        vals.append(random.uniform(-1.0, 1.0) * scale)
-    return vals
-
-
-def zeros(n: int) -> List[float]:
-    return [0.0] * n
-
-
-def make_tensor(shape: Sequence[int], values: Sequence[float]) -> ktorch.Tensor:
-    t = ktorch.Tensor(list(shape), dtype=ktorch.DType.F32, device=ktorch.Device.CUDA)
-    t.copy_from_list_float(list(values))
-    return t
-
-
-def make_labels_tensor(labels: Sequence[int]) -> ktorch.Tensor:
-    t = ktorch.Tensor([len(labels)], dtype=ktorch.DType.I32, device=ktorch.Device.CUDA)
-    t.copy_from_list_int32([int(v) for v in labels])
-    return t
+def init_model_params(seed: int, in_dim: int, hidden: int, out_dim: int):
+    w1 = ktorch.random_uniform(
+        [hidden, in_dim],
+        low=-0.05,
+        high=0.05,
+        seed=seed + 11,
+        dtype=ktorch.DType.F32,
+        device=ktorch.Device.CUDA,
+    )
+    b1 = ktorch.zeros([hidden], dtype=ktorch.DType.F32, device=ktorch.Device.CUDA)
+    w2 = ktorch.random_uniform(
+        [out_dim, hidden],
+        low=-0.05,
+        high=0.05,
+        seed=seed + 23,
+        dtype=ktorch.DType.F32,
+        device=ktorch.Device.CUDA,
+    )
+    b2 = ktorch.zeros([out_dim], dtype=ktorch.DType.F32, device=ktorch.Device.CUDA)
+    return w1, b1, w2, b2
 
 
 def next_batch(it, loader):
@@ -66,7 +60,7 @@ def next_batch(it, loader):
         return next(it), it
 
 
-def train_step(batch, w1, b1, w2, b2, in_dim: int, out_dim: int, lr: float, compute_metrics: bool):
+def train_step(batch, w1, b1, w2, b2, in_dim: int, lr: float, compute_metrics: bool):
     x, labels_t = batch
     bsz = int(x.shape[0])
     x.view([bsz, in_dim])
@@ -87,15 +81,14 @@ def train_step(batch, w1, b1, w2, b2, in_dim: int, out_dim: int, lr: float, comp
     ops.sgd_update_(w1, g1.dW, lr)
     ops.sgd_update_(b1, g1.db, lr)
 
-    if not compute_metrics:
-        raise RuntimeError("train_step was called with compute_metrics=False but metrics were requested.")
+    correct_t: Optional[ktorch.Tensor] = None
+    if compute_metrics:
+        correct_t = ops.classification_correct_count(z2, labels_t)
 
-    correct = ops.classification_correct_count(z2, labels_t)
-
-    return loss_t, correct, bsz
+    return loss_t, correct_t, bsz
 
 
-def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, out_dim: int, max_batches: int) -> Tuple[float, float]:
+def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, max_batches: int) -> Tuple[float, float]:
     total_loss = 0.0
     total_correct = 0
     total_seen = 0
@@ -126,23 +119,6 @@ def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, out_dim: int, max_batches
     return avg_loss, acc
 
 
-def init_params(in_dim: int, hidden: int, out_dim: int):
-    w1_vals = random_init(hidden, in_dim, scale=0.05)
-    b1_vals = zeros(hidden)
-    w2_vals = random_init(out_dim, hidden, scale=0.05)
-    b2_vals = zeros(out_dim)
-    return w1_vals, b1_vals, w2_vals, b2_vals
-
-
-def build_params(in_dim: int, hidden: int, out_dim: int, init_vals):
-    w1_vals, b1_vals, w2_vals, b2_vals = init_vals
-    w1 = make_tensor([hidden, in_dim], w1_vals)
-    b1 = make_tensor([hidden], b1_vals)
-    w2 = make_tensor([out_dim, hidden], w2_vals)
-    b2 = make_tensor([out_dim], b2_vals)
-    return w1, b1, w2, b2
-
-
 def make_ktorch_loader(dataset, batch_size: int, shuffle: bool, seed: int):
     ds = from_torch_dataset(dataset)
     return DataLoader(
@@ -155,8 +131,8 @@ def make_ktorch_loader(dataset, batch_size: int, shuffle: bool, seed: int):
     )
 
 
-def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: int, init_vals) -> float:
-    w1, b1, w2, b2 = build_params(in_dim, hidden, out_dim, init_vals)
+def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: int) -> float:
+    w1, b1, w2, b2 = init_model_params(args.seed, in_dim, hidden, out_dim)
     loader_it = iter(train_loader)
     measured: List[float] = []
 
@@ -164,7 +140,7 @@ def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: in
     for step in range(total_steps):
         batch, loader_it = next_batch(loader_it, train_loader)
         t0 = time.perf_counter()
-        train_step(batch, w1, b1, w2, b2, in_dim, out_dim, args.lr, compute_metrics=False)
+        train_step(batch, w1, b1, w2, b2, in_dim, args.lr, compute_metrics=False)
         dt = time.perf_counter() - t0
         if step >= args.benchmark_warmup:
             measured.append(dt)
@@ -173,9 +149,8 @@ def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: in
 
 
 def run_compare_benchmark(train_ds, args, in_dim: int, hidden: int, out_dim: int) -> None:
-    init_vals = init_params(in_dim, hidden, out_dim)
     loader = make_ktorch_loader(train_ds, batch_size=args.batch_size, shuffle=False, seed=args.seed)
-    median = run_step_benchmark(loader, args, in_dim, hidden, out_dim, init_vals)
+    median = run_step_benchmark(loader, args, in_dim, hidden, out_dim)
     print("[benchmark] train-step median (batch_size=%d, warmup=%d, steps=%d)" % (
         args.batch_size,
         args.benchmark_warmup,
@@ -186,7 +161,6 @@ def run_compare_benchmark(train_ds, args, in_dim: int, hidden: int, out_dim: int
 
 def main() -> None:
     args = parse_args()
-    set_seed(args.seed)
 
     try:
         import torch
@@ -211,52 +185,35 @@ def main() -> None:
     train_loader = make_ktorch_loader(train_ds, batch_size=args.batch_size, shuffle=True, seed=args.seed)
     test_loader = make_ktorch_loader(test_ds, batch_size=args.batch_size, shuffle=False, seed=args.seed)
 
-    init_vals = init_params(in_dim, hidden, out_dim)
-    w1, b1, w2, b2 = build_params(in_dim, hidden, out_dim, init_vals)
+    w1, b1, w2, b2 = init_model_params(args.seed, in_dim, hidden, out_dim)
 
     train_start = time.perf_counter()
 
     for epoch in range(args.epochs):
-        '''total_loss = 0.0
-        total_correct = 0
-        total_seen = 0'''
-
         for batch_idx, batch in enumerate(train_loader):
             if args.max_train_batches > 0 and batch_idx >= args.max_train_batches:
                 break
 
-            loss, correct, bsz = train_step(
+            loss_t, correct_t, _ = train_step(
                 batch,
                 w1,
                 b1,
                 w2,
                 b2,
                 in_dim,
-                out_dim,
                 args.lr,
                 compute_metrics=True,
             )
+            if correct_t is None:
+                raise RuntimeError("internal error: compute_metrics=True must return correct_t tensor")
+            _ = loss_t
 
-            '''total_loss += loss * bsz
-            total_correct += correct
-            total_seen += bsz
-
-        train_loss = total_loss / max(total_seen, 1)
-        train_acc = total_correct / max(total_seen, 1)
-        test_loss, test_acc = evaluate(test_loader, w1, b1, w2, b2, in_dim, out_dim, args.max_test_batches)
-
-        print(
-            f"[epoch {epoch + 1}/{args.epochs}] "
-            "path=native_ktorch "
-            f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
-            f"test_loss={test_loss:.4f} test_acc={test_acc:.4f}"
-        )'''
     ktorch.synchronize()  # Ensure all GPU work is done before stopping the timer.
 
     train_end = time.perf_counter()
     print(f"Training completed in {train_end - train_start:.2f} seconds.")
 
-    test_loss, test_acc = evaluate(test_loader, w1, b1, w2, b2, in_dim, out_dim, args.max_test_batches)
+    test_loss, test_acc = evaluate(test_loader, w1, b1, w2, b2, in_dim, args.max_test_batches)
     print(f"Final test loss: {test_loss:.4f}, test accuracy: {test_acc:.4f}")
 
 

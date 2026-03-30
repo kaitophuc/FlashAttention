@@ -162,7 +162,7 @@ endforeach()
 if(FA_CORE_SOURCES)
   add_library(flashattention_core STATIC ${FA_CORE_SOURCES})
   set_target_properties(flashattention_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  target_link_libraries(flashattention_core PUBLIC flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt)
+  target_link_libraries(flashattention_core PUBLIC flashattention_common CUDA::cudart CUDA::cublas CUDA::cublasLt CUDA::curand)
 endif()
 
 set(FA_TEST_SOURCES)
@@ -343,7 +343,7 @@ if(FA_BUILD_PYTHON)
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/bindings/python
   )
-  target_link_libraries(ktorch_cpp PRIVATE flashattention_core CUDA::cudart CUDA::cublas CUDA::cublasLt)
+  target_link_libraries(ktorch_cpp PRIVATE flashattention_core CUDA::cudart CUDA::cublas CUDA::cublasLt CUDA::curand)
   set_target_properties(ktorch_cpp PROPERTIES
     OUTPUT_NAME _C
   )
