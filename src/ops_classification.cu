@@ -1,32 +1,59 @@
 #include "ops.h"
 
 #include <cfloat>
+#include <climits>
 
 namespace {
 
+template <int kBlockSize>
 __global__ void classification_correct_count_kernel(const float* __restrict__ logits,
                                                     const int32_t* __restrict__ labels,
                                                     int32_t* __restrict__ correct,
                                                     int64_t m,
                                                     int64_t n) {
-    const int row = blockIdx.x;
-    if (row >= m) {
-        return;
-    }
+    __shared__ float s_vals[kBlockSize];
+    __shared__ int s_indices[kBlockSize];
 
-    const int64_t row_offset = static_cast<int64_t>(row) * n;
-    float best_val = -FLT_MAX;
-    int best_idx = 0;
-    for (int64_t col = 0; col < n; ++col) {
-        const float v = logits[row_offset + col];
-        if (v > best_val) {
-            best_val = v;
-            best_idx = static_cast<int>(col);
+    int local_correct = 0;
+    for (int64_t row = blockIdx.x; row < m; row += gridDim.x) {
+        const int tid = threadIdx.x;
+        const int64_t row_offset = row * n;
+
+        float thread_best_val = -FLT_MAX;
+        int thread_best_idx = INT_MAX;
+        for (int64_t col = tid; col < n; col += kBlockSize) {
+            const float v = logits[row_offset + col];
+            const int col_i = static_cast<int>(col);
+            if (v > thread_best_val || (v == thread_best_val && col_i < thread_best_idx)) {
+                thread_best_val = v;
+                thread_best_idx = col_i;
+            }
         }
+
+        s_vals[tid] = thread_best_val;
+        s_indices[tid] = thread_best_idx;
+        __syncthreads();
+
+        for (int stride = kBlockSize / 2; stride > 0; stride >>= 1) {
+            if (tid < stride) {
+                const float other_val = s_vals[tid + stride];
+                const int other_idx = s_indices[tid + stride];
+                if (other_val > s_vals[tid] || (other_val == s_vals[tid] && other_idx < s_indices[tid])) {
+                    s_vals[tid] = other_val;
+                    s_indices[tid] = other_idx;
+                }
+            }
+            __syncthreads();
+        }
+
+        if (tid == 0 && s_indices[0] == labels[row]) {
+            ++local_correct;
+        }
+        __syncthreads();
     }
 
-    if (best_idx == labels[row]) {
-        atomicAdd(correct, 1);
+    if (threadIdx.x == 0 && local_correct > 0) {
+        atomicAdd(correct, local_correct);
     }
 }
 
@@ -65,7 +92,9 @@ Tensor classification_correct_count(const Tensor& logits, const Tensor& labels, 
     }
 
     Tensor correct = Tensor::zeros({1}, DType::I32, Device::CUDA, *stream);
-    classification_correct_count_kernel<<<static_cast<int>(m), 1, 0, stream->s>>>(
+    constexpr int kBlockSize = 256;
+    const int grid = (m < 1024) ? static_cast<int>(m) : 1024;
+    classification_correct_count_kernel<kBlockSize><<<grid, kBlockSize, 0, stream->s>>>(
         static_cast<const float*>(logits.data_),
         static_cast<const int32_t*>(labels.data_),
         static_cast<int32_t*>(correct.data_),

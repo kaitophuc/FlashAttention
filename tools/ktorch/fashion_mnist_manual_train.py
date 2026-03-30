@@ -88,13 +88,11 @@ def train_step(batch, w1, b1, w2, b2, in_dim: int, out_dim: int, lr: float, comp
     ops.sgd_update_(b1, g1.db, lr)
 
     if not compute_metrics:
-        loss = float(loss_t.item_float())
-        return loss, 0, bsz
+        raise RuntimeError("train_step was called with compute_metrics=False but metrics were requested.")
 
-    loss = float(loss_t.item_float())
-    correct = int(ops.classification_correct_count(z2, labels_t).item_int32())
+    correct = ops.classification_correct_count(z2, labels_t)
 
-    return loss, correct, bsz
+    return loss_t, correct, bsz
 
 
 def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, out_dim: int, max_batches: int) -> Tuple[float, float]:
@@ -219,9 +217,9 @@ def main() -> None:
     train_start = time.perf_counter()
 
     for epoch in range(args.epochs):
-        total_loss = 0.0
+        '''total_loss = 0.0
         total_correct = 0
-        total_seen = 0
+        total_seen = 0'''
 
         for batch_idx, batch in enumerate(train_loader):
             if args.max_train_batches > 0 and batch_idx >= args.max_train_batches:
@@ -239,7 +237,7 @@ def main() -> None:
                 compute_metrics=True,
             )
 
-            total_loss += loss * bsz
+            '''total_loss += loss * bsz
             total_correct += correct
             total_seen += bsz
 
@@ -252,10 +250,14 @@ def main() -> None:
             "path=native_ktorch "
             f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
             f"test_loss={test_loss:.4f} test_acc={test_acc:.4f}"
-        )
+        )'''
+    ktorch.synchronize()  # Ensure all GPU work is done before stopping the timer.
 
     train_end = time.perf_counter()
     print(f"Training completed in {train_end - train_start:.2f} seconds.")
+
+    test_loss, test_acc = evaluate(test_loader, w1, b1, w2, b2, in_dim, out_dim, args.max_test_batches)
+    print(f"Final test loss: {test_loss:.4f}, test accuracy: {test_acc:.4f}")
 
 
 if __name__ == "__main__":

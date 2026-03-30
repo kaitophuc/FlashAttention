@@ -328,6 +328,7 @@ if(FA_BUILD_PYTHON)
   set(FA_PYTHON_BINDING_SOURCES
     bindings/python/module.cpp
     bindings/python/py_dtype_device.cpp
+    bindings/python/py_stream.cpp
     bindings/python/py_tensor.cpp
     bindings/python/py_ops_linear.cpp
     bindings/python/py_ops_layernorm.cpp

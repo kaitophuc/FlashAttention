@@ -4,6 +4,7 @@ PYBIND11_MODULE(_C, m) {
     m.doc() = "ktorch native CUDA bindings";
 
     bind_dtype_device(m);
+    bind_stream(m);
     bind_tensor(m);
     bind_linear(m);
     bind_layernorm(m);

@@ -6,6 +6,7 @@ _C = importlib.import_module("ktorch._C")
 Tensor = _C.Tensor
 Device = _C.Device
 DType = _C.DType
+Stream = _C.Stream
 
 
 def empty(shape, dtype=DType.F32, device=Device.CUDA):
@@ -14,6 +15,14 @@ def empty(shape, dtype=DType.F32, device=Device.CUDA):
 
 def zeros(shape, dtype=DType.F32, device=Device.CUDA):
     return _C.zeros(shape, dtype, device)
+
+
+def default_stream() -> Stream:
+    return _C.default_stream()
+
+
+def synchronize() -> None:
+    _C.synchronize()
 
 
 def from_numpy(array: Any, device=Device.CUDA):

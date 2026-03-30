@@ -268,6 +268,7 @@ inline int32_t tensor_item_int32(const Tensor& src) {
 }
 
 void bind_dtype_device(py::module_& m);
+void bind_stream(py::module_& m);
 void bind_tensor(py::module_& m);
 void bind_linear(py::module_& m);
 void bind_layernorm(py::module_& m);
