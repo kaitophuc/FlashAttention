@@ -1,19 +1,75 @@
 #include "py_bindings.h"
 
+namespace {
+
+struct PyStreamGuard {
+    std::unique_ptr<StreamGuard> guard;
+
+    explicit PyStreamGuard(const Stream& stream)
+        : guard(std::make_unique<StreamGuard>(stream)) {}
+
+    Stream enter() const {
+        return current_stream();
+    }
+
+    void exit(const py::object&, const py::object&, const py::object&) {
+        guard.reset();
+    }
+};
+
+}  // namespace
+
 void bind_stream(py::module_& m) {
     py::class_<Stream>(m, "Stream")
         .def("synchronize", &Stream::synchronize);
 
-    m.def("default_stream",
-          []() -> Stream& {
-              return py_default_stream();
+    py::class_<PyStreamGuard>(m, "StreamGuard")
+        .def("__enter__", &PyStreamGuard::enter)
+        .def("__exit__", &PyStreamGuard::exit);
+
+    m.def("current_stream",
+          []() {
+              return current_stream();
           },
-          py::return_value_policy::reference,
-          "Return the process-wide default CUDA stream wrapper.");
+          "Return the thread-local active CUDA stream (always non-default).");
+
+    m.def("set_current_stream",
+          [](const Stream& stream) {
+              set_current_stream(stream);
+          },
+          py::arg("stream"),
+          "Set the thread-local active CUDA stream.");
+
+    m.def("stream_from_pool",
+          [](int idx) {
+              return stream_from_pool(idx);
+          },
+          py::arg("idx"),
+          "Get a non-default stream by pool index.");
+
+    m.def("next_stream",
+          []() {
+              return next_stream();
+          },
+          "Get the next non-default stream from the runtime pool.");
+
+    m.def("stream_pool_size",
+          []() {
+              return stream_pool_size();
+          },
+          "Get runtime stream pool size.");
+
+    m.def("stream_guard",
+          [](const Stream& stream) {
+              return PyStreamGuard(stream);
+          },
+          py::arg("stream"),
+          "Context manager that temporarily sets current stream.");
 
     m.def("synchronize",
           []() {
-              py_default_stream().synchronize();
+              Stream stream = current_stream();
+              stream.synchronize();
           },
-          "Synchronize the default CUDA stream.");
+          "Synchronize current CUDA stream.");
 }

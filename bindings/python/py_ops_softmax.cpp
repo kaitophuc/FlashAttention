@@ -7,7 +7,8 @@ std::shared_ptr<Tensor> softmax_forward_py(const std::shared_ptr<Tensor>& x) {
         throw std::invalid_argument("ktorch.softmax_forward: x must not be None.");
     }
 
-    Tensor y = softmax_forward(*x, &py_default_stream());
+    Stream stream = py_current_stream();
+    Tensor y = softmax_forward(*x, &stream);
     return make_tensor_shared(std::move(y));
 }
 
@@ -16,7 +17,8 @@ std::shared_ptr<Tensor> softmax_backward_py(const std::shared_ptr<Tensor>& dY, c
         throw std::invalid_argument("ktorch.softmax_backward: dY and y must not be None.");
     }
 
-    SoftmaxGrads grads = softmax_backward(*dY, *y, &py_default_stream());
+    Stream stream = py_current_stream();
+    SoftmaxGrads grads = softmax_backward(*dY, *y, &stream);
     return make_tensor_shared(std::move(grads.dX));
 }
 
@@ -27,13 +29,15 @@ std::pair<std::shared_ptr<Tensor>, SoftmaxCrossEntropyContextPy> softmax_cross_e
         throw std::invalid_argument("ktorch.softmax_cross_entropy_forward: logits and labels must not be None.");
     }
 
-    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(*logits, *labels, &py_default_stream());
+    Stream stream = py_current_stream();
+    SoftmaxCrossEntropyResults out = softmax_cross_entropy_forward(*logits, *labels, &stream);
     SoftmaxCrossEntropyContextPy ctx(std::move(out.ctx), labels);
     return {make_tensor_shared(std::move(out.loss)), std::move(ctx)};
 }
 
 std::shared_ptr<Tensor> softmax_cross_entropy_backward_py(const SoftmaxCrossEntropyContextPy& ctx) {
-    SoftmaxCrossEntropyGrads grads = softmax_cross_entropy_backward(ctx.ctx, &py_default_stream());
+    Stream stream = py_current_stream();
+    SoftmaxCrossEntropyGrads grads = softmax_cross_entropy_backward(ctx.ctx, &stream);
     return make_tensor_shared(std::move(grads.dX));
 }
 

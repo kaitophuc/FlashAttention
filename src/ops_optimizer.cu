@@ -23,9 +23,7 @@ void sgd_update_(Tensor& param, const Tensor& grad, float lr, Stream* stream) {
     if (stream == nullptr) {
         throw std::invalid_argument("ops_optimizer.cu: sgd_update_: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_optimizer.cu: sgd_update_: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_optimizer.cu: sgd_update_");
     if (!std::isfinite(lr)) {
         throw std::invalid_argument("ops_optimizer.cu: sgd_update_: lr must be finite.");
     }

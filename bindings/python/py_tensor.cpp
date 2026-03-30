@@ -17,8 +17,8 @@ void bind_tensor(py::module_& m) {
         .def("clone", [](const Tensor& self, Device device) { return tensor_clone(self, device); }, py::arg("device"))
         .def("zero_", [](Tensor& self) {
             if (self.device_ == Device::CUDA) {
-                self.zero_(py_default_stream());
-                py_default_stream().synchronize();
+                Stream stream = py_current_stream();
+                self.zero_(stream);
             } else {
                 self.zero_();
             }

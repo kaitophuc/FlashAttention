@@ -59,9 +59,7 @@ struct Tensor {
         if (device != Device::CUDA) {
             throw std::invalid_argument("tensor.h: Stream argument is only valid for CUDA tensors.");
         }
-        if (stream.s != cudaStream_t(0)) {
-            throw std::invalid_argument("tensor.h: Stream argument should be the default stream at this phase.");
-        }
+        assert_non_default_stream(stream.s, "tensor.h: Tensor(shape,dtype,device,stream)");
         checkValid(shape, dtype, device);
         dtype_ = dtype;
         device_ = device;
@@ -94,7 +92,7 @@ struct Tensor {
         nbytes_ = numel_ * dtype_size(dtype_);
 
         if (device_ == Device::CUDA) {
-            Stream current(cudaStream_t(0)); //get_current_stream());
+            Stream current = current_stream();
             data_ = allocate_device(nbytes_, current);
         } else {
             data_ = allocate_host(nbytes_);
@@ -143,7 +141,7 @@ struct Tensor {
 
     static Tensor empty(std::vector<int64_t> shape, DType dtype, Device device) {
         if (device == Device::CUDA) {
-            Stream current(cudaStream_t(0)); //get_current_stream());
+            Stream current = current_stream();
             return Tensor(std::move(shape), dtype, device, current);
         }
         return Tensor(std::move(shape), dtype, device);
@@ -153,9 +151,7 @@ struct Tensor {
         if (device != Device::CUDA) {
             throw std::invalid_argument("tensor.h: Stream argument is only valid for CUDA tensors.");
         }
-        if (stream.s != cudaStream_t(0)) {
-            throw std::invalid_argument("tensor.h: Stream argument should be the default stream at this phase.");
-        }
+        assert_non_default_stream(stream.s, "tensor.h: zeros");
         Tensor out(std::move(shape), dtype, device, stream);
         out.zero_(stream);
         return out;
@@ -203,9 +199,7 @@ struct Tensor {
         if (!check_dtype_match<T>()) {
             throw std::runtime_error("Requested dtype does not match tensor dtype.");
         }
-        if (stream.s != cudaStream_t(0)) {
-            throw std::invalid_argument("tensor.h: Stream argument should be the default stream at this phase.");
-        }
+        assert_non_default_stream(stream.s, "tensor.h: to_vector");
         if (device_ != Device::CUDA) {
             throw std::invalid_argument("tensor.h: Stream argument is only valid for CUDA tensors.");
         }
@@ -221,7 +215,7 @@ struct Tensor {
             throw std::runtime_error("Requested dtype does not match tensor dtype.");
         }
         if (device_ == Device::CUDA) {
-            Stream current(cudaStream_t(0)); //get_current_stream());
+            Stream current = current_stream();
             return to_vector<T>(current);
         } else {
             return std::vector<T>(data<T>(), data<T>() + numel_);
@@ -267,9 +261,7 @@ struct Tensor {
         if (device != Device::CUDA) {
             throw std::invalid_argument("tensor.h: Stream argument is only valid for CUDA tensors.");
         }
-        if (stream.s != cudaStream_t(0)) {
-            throw std::invalid_argument("tensor.h: Stream argument should be the default stream at this phase.");
-        }
+        assert_non_default_stream(stream.s, "tensor.h: clone(device, stream)");
         Tensor cloned(shape_, dtype_, device, stream);
         // Copy data from this tensor to the cloned tensor.
         cudaMemcpyKind kind;
@@ -294,14 +286,14 @@ struct Tensor {
 
         if (device_ == Device::CUDA && device == Device::CPU) {
             Tensor cloned(shape_, dtype_, Device::CPU);
-            Stream current(cudaStream_t(0)); //get_current_stream());
-            CUDA_CHECK(cudaMemcpyAsync(cloned.data_, data_, nbytes_, cudaMemcpyDeviceToHost, current.s)); //get_current_stream()));
+            Stream current = current_stream();
+            CUDA_CHECK(cudaMemcpyAsync(cloned.data_, data_, nbytes_, cudaMemcpyDeviceToHost, current.s));
             current.synchronize();
             return cloned;
         }
 
         if (device == Device::CUDA) {
-            Stream current(cudaStream_t(0)); //get_current_stream());
+            Stream current = current_stream();
             Tensor cloned = clone(device, current);   // existing stream overload
             current.synchronize();
             return cloned;
@@ -312,9 +304,7 @@ struct Tensor {
 
 
     void zero_(Stream& stream) {
-        if (stream.s != cudaStream_t(0)) {
-            throw std::invalid_argument("tensor.h: Stream argument should be the default stream at this phase.");
-        }
+        assert_non_default_stream(stream.s, "tensor.h: zero_(stream)");
         if (device_ != Device::CUDA) {
             throw std::invalid_argument("tensor.h: Stream argument is only valid for CUDA tensors.");
         }
@@ -323,16 +313,15 @@ struct Tensor {
 
     void zero_() {
         if (device_ == Device::CUDA) {
-            CUDA_CHECK(cudaMemsetAsync(data_, 0, nbytes_, cudaStream_t(0))); //get_current_stream()));
+            Stream current = current_stream();
+            CUDA_CHECK(cudaMemsetAsync(data_, 0, nbytes_, current.s));
         } else {
             std::memset(data_, 0, nbytes_);
         }
     }
 
     void copy_from(const Tensor& src, Stream& stream) {
-        if (stream.s != cudaStream_t(0)) {
-            throw std::invalid_argument("tensor.h: Stream argument should be the default stream at this phase.");
-        }
+        assert_non_default_stream(stream.s, "tensor.h: copy_from(tensor, stream)");
         if (shape_ != src.shape_) {
             throw std::invalid_argument("tensor.h: Source and destination tensors must have the same shape.");
         }
@@ -358,9 +347,7 @@ struct Tensor {
 
     template <typename T>
     void copy_from(const std::vector<T>& src, Stream& stream) {
-        if (stream.s != cudaStream_t(0)) {
-            throw std::invalid_argument("tensor.h: Stream argument should be the default stream at this phase.");
-        }
+        assert_non_default_stream(stream.s, "tensor.h: copy_from(vector, stream)");
         if (!check_dtype_match<T>()) {
             throw std::runtime_error("Requested dtype does not match tensor dtype.");
         }
@@ -383,7 +370,8 @@ struct Tensor {
             throw std::invalid_argument("tensor.h: Source vector size must match the number of elements in the tensor.");
         }
         if (device_ == Device::CUDA) {
-            CUDA_CHECK(cudaMemcpyAsync(data_, src.data(), src.size() * sizeof(T), cudaMemcpyHostToDevice, cudaStream_t(0))); //get_current_stream()));
+            Stream current = current_stream();
+            CUDA_CHECK(cudaMemcpyAsync(data_, src.data(), src.size() * sizeof(T), cudaMemcpyHostToDevice, current.s));
         } else {
             std::memcpy(data_, src.data(), src.size() * sizeof(T));
         }

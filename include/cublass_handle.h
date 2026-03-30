@@ -37,3 +37,8 @@ struct CublasHandle {
         return lt_handle;
     }
 };
+
+inline CublasHandle& current_cublas_handle() {
+    thread_local CublasHandle handle;
+    return handle;
+}

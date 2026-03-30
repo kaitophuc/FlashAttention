@@ -166,9 +166,7 @@ LayerNormResults layernorm_forward(const Tensor& X,
     if (stream == nullptr) {
         throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_layernorm.cu: Layernorm_forward");
     if (eps <= 0.0f) {
         throw std::invalid_argument("ops_layernorm.cu: Layernorm_forward: eps must be greater than 0.");
     }
@@ -225,9 +223,7 @@ LayerNormGrads layernorm_backward(const Tensor& dY,
     if (stream == nullptr) {
         throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_layernorm.cu: Layernorm_backward");
     if (ctx.X == nullptr || ctx.gamma == nullptr) {
         throw std::invalid_argument("ops_layernorm.cu: Layernorm_backward: ctx.X and ctx.gamma cannot be null.");
     }

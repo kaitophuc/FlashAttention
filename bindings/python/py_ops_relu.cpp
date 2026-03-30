@@ -7,7 +7,8 @@ std::pair<std::shared_ptr<Tensor>, ReluContextPy> relu_forward_py(const std::sha
         throw std::invalid_argument("ktorch.relu_forward: x must not be None.");
     }
 
-    ReluResults out = relu_forward(*x, &py_default_stream());
+    Stream stream = py_current_stream();
+    ReluResults out = relu_forward(*x, &stream);
 
     ReluContextPy ctx;
     ctx.ctx = out.ctx;
@@ -22,7 +23,8 @@ std::shared_ptr<Tensor> relu_backward_py(const std::shared_ptr<Tensor>& dY, cons
         throw std::invalid_argument("ktorch.relu_backward: dY must not be None.");
     }
 
-    ReluGrads grads = relu_backward(*dY, ctx.ctx, &py_default_stream());
+    Stream stream = py_current_stream();
+    ReluGrads grads = relu_backward(*dY, ctx.ctx, &stream);
     return make_tensor_shared(std::move(grads.dX));
 }
 
@@ -34,4 +36,3 @@ void bind_relu(py::module_& m) {
     m.def("relu_forward", &relu_forward_py, py::arg("x"), "Returns (y, ctx).");
     m.def("relu_backward", &relu_backward_py, py::arg("dY"), py::arg("ctx"));
 }
-

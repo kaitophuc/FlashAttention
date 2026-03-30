@@ -37,7 +37,7 @@ TEST(ClassificationCorrectCount, MatchesReferenceSmallKnownCase) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     constexpr int64_t m = 4;
     constexpr int64_t n = 3;
     Tensor logits({m, n}, DType::F32, Device::CUDA, stream);
@@ -65,7 +65,7 @@ TEST(ClassificationCorrectCount, MatchesReferenceLargerAndTieBehavior) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     constexpr int64_t m = 6;
     constexpr int64_t n = 5;
     Tensor logits({m, n}, DType::F32, Device::CUDA, stream);
@@ -103,7 +103,7 @@ TEST(ClassificationCorrectCount, RejectsInvalidInputs) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     Tensor logits_f32({2, 3}, DType::F32, Device::CUDA, stream);
     Tensor labels_i32({2}, DType::I32, Device::CUDA, stream);
     Tensor logits_i32({2, 3}, DType::I32, Device::CUDA, stream);
@@ -128,7 +128,7 @@ TEST(ClassificationCorrectCount, RejectsInvalidInputs) {
     Stream non_default_stream;
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
-    EXPECT_THROW((void)classification_correct_count(logits_f32, labels_i32, &non_default_stream), std::invalid_argument);
+    EXPECT_NO_THROW((void)classification_correct_count(logits_f32, labels_i32, &non_default_stream));
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
 

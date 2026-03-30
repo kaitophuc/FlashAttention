@@ -63,9 +63,7 @@ Tensor classification_correct_count(const Tensor& logits, const Tensor& labels, 
     if (stream == nullptr) {
         throw std::invalid_argument("ops_classification.cu: classification_correct_count: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_classification.cu: classification_correct_count: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_classification.cu: classification_correct_count");
     if (logits.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_classification.cu: classification_correct_count: logits must be float32.");
     }

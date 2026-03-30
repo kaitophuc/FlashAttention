@@ -87,9 +87,7 @@ Tensor softmax_forward(const Tensor& X, Stream* stream) {
     if (stream == nullptr) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_softmax.cu: Softmax_forward");
     if (X.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_forward: Only float32 tensors are supported.");
     }
@@ -115,9 +113,7 @@ SoftmaxGrads softmax_backward(const Tensor& dY, const Tensor& Y, Stream* stream)
     if (stream == nullptr) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_softmax.cu: Softmax_backward");
     if (dY.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_softmax.cu: Softmax_backward: Only float32 tensors are supported.");
     }
@@ -218,9 +214,7 @@ SoftmaxCrossEntropyResults softmax_cross_entropy_forward(const Tensor& logits, c
     if (stream == nullptr) {
         throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_softmax.cu: SoftmaxCrossEntropy_forward");
     if (logits.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_forward: logits must be float32.");
     }
@@ -268,9 +262,7 @@ SoftmaxCrossEntropyGrads softmax_cross_entropy_backward(const SoftmaxCrossEntrop
     if (stream == nullptr) {
         throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_softmax.cu: SoftmaxCrossEntropy_backward");
     if (ctx.labels == nullptr) {
         throw std::invalid_argument("ops_softmax.cu: SoftmaxCrossEntropy_backward: ctx.labels cannot be null.");
     }

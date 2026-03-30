@@ -71,13 +71,12 @@ struct LayerNormGradsPy {
     bool has_dbeta{false};
 };
 
-inline Stream& py_default_stream() {
-    static Stream stream(cudaStream_t(0));
-    return stream;
+inline Stream py_current_stream() {
+    return current_stream();
 }
 
 inline CublasHandle& py_default_cublas_handle() {
-    static CublasHandle handle;
+    thread_local CublasHandle handle;
     return handle;
 }
 
@@ -94,21 +93,24 @@ inline std::shared_ptr<Tensor> optional_tensor_to_shared(std::optional<Tensor>&&
 
 inline std::shared_ptr<Tensor> make_tensor(const std::vector<int64_t>& shape, DType dtype, Device device) {
     if (device == Device::CUDA) {
-        return make_tensor_shared(Tensor(shape, dtype, device, py_default_stream()));
+        Stream stream = py_current_stream();
+        return make_tensor_shared(Tensor(shape, dtype, device, stream));
     }
     return make_tensor_shared(Tensor(shape, dtype, device));
 }
 
 inline std::shared_ptr<Tensor> tensor_empty(const std::vector<int64_t>& shape, DType dtype, Device device) {
     if (device == Device::CUDA) {
-        return make_tensor_shared(Tensor::empty(shape, dtype, device, py_default_stream()));
+        Stream stream = py_current_stream();
+        return make_tensor_shared(Tensor::empty(shape, dtype, device, stream));
     }
     return make_tensor_shared(Tensor::empty(shape, dtype, device));
 }
 
 inline std::shared_ptr<Tensor> tensor_zeros(const std::vector<int64_t>& shape, DType dtype, Device device) {
     if (device == Device::CUDA) {
-        return make_tensor_shared(Tensor::zeros(shape, dtype, device, py_default_stream()));
+        Stream stream = py_current_stream();
+        return make_tensor_shared(Tensor::zeros(shape, dtype, device, stream));
     }
     return make_tensor_shared(Tensor::zeros(shape, dtype, device));
 }
@@ -120,14 +122,16 @@ inline std::shared_ptr<Tensor> tensor_random_uniform(const std::vector<int64_t>&
                                                      DType dtype,
                                                      Device device) {
     if (device == Device::CUDA) {
-        return make_tensor_shared(Tensor::random_uniform(shape, low, high, seed, dtype, device, py_default_stream()));
+        Stream stream = py_current_stream();
+        return make_tensor_shared(Tensor::random_uniform(shape, low, high, seed, dtype, device, stream));
     }
     return make_tensor_shared(Tensor::random_uniform(shape, low, high, seed, dtype, device));
 }
 
 inline std::shared_ptr<Tensor> tensor_clone(const Tensor& src, Device device) {
     if (device == Device::CUDA) {
-        return make_tensor_shared(src.clone(device, py_default_stream()));
+        Stream stream = py_current_stream();
+        return make_tensor_shared(src.clone(device, stream));
     }
     return make_tensor_shared(src.clone(device));
 }
@@ -138,7 +142,8 @@ inline void tensor_copy_from_list_float(Tensor& dst, const std::vector<float>& v
     }
     dst.copy_from(values);
     if (dst.device_ == Device::CUDA) {
-        py_default_stream().synchronize();
+        Stream stream = py_current_stream();
+        stream.synchronize();
     }
 }
 
@@ -148,7 +153,8 @@ inline void tensor_copy_from_list_int32(Tensor& dst, const std::vector<int32_t>&
     }
     dst.copy_from(values);
     if (dst.device_ == Device::CUDA) {
-        py_default_stream().synchronize();
+        Stream stream = py_current_stream();
+        stream.synchronize();
     }
 }
 
@@ -209,8 +215,9 @@ inline void tensor_copy_from_buffer_float(Tensor& dst, const py::object& obj) {
     }
 
     if (dst.device_ == Device::CUDA) {
-        CUDA_CHECK(cudaMemcpyAsync(dst.data_, arr.data(), dst.nbytes_, cudaMemcpyHostToDevice, py_default_stream().s));
-        py_default_stream().synchronize();
+        Stream stream = py_current_stream();
+        CUDA_CHECK(cudaMemcpyAsync(dst.data_, arr.data(), dst.nbytes_, cudaMemcpyHostToDevice, stream.s));
+        stream.synchronize();
     } else {
         std::memcpy(dst.data_, arr.data(), dst.nbytes_);
     }
@@ -226,8 +233,9 @@ inline void tensor_copy_from_buffer_int32(Tensor& dst, const py::object& obj) {
     }
 
     if (dst.device_ == Device::CUDA) {
-        CUDA_CHECK(cudaMemcpyAsync(dst.data_, arr.data(), dst.nbytes_, cudaMemcpyHostToDevice, py_default_stream().s));
-        py_default_stream().synchronize();
+        Stream stream = py_current_stream();
+        CUDA_CHECK(cudaMemcpyAsync(dst.data_, arr.data(), dst.nbytes_, cudaMemcpyHostToDevice, stream.s));
+        stream.synchronize();
     } else {
         std::memcpy(dst.data_, arr.data(), dst.nbytes_);
     }
@@ -239,8 +247,9 @@ inline py::array_t<float> tensor_to_numpy_float(const Tensor& src) {
     }
     py::array_t<float> out(shape_to_py(src.shape_));
     if (src.device_ == Device::CUDA) {
-        CUDA_CHECK(cudaMemcpyAsync(out.mutable_data(), src.data_, src.nbytes_, cudaMemcpyDeviceToHost, py_default_stream().s));
-        py_default_stream().synchronize();
+        Stream stream = py_current_stream();
+        CUDA_CHECK(cudaMemcpyAsync(out.mutable_data(), src.data_, src.nbytes_, cudaMemcpyDeviceToHost, stream.s));
+        stream.synchronize();
     } else {
         std::memcpy(out.mutable_data(), src.data_, src.nbytes_);
     }
@@ -253,8 +262,9 @@ inline py::array_t<int32_t> tensor_to_numpy_int32(const Tensor& src) {
     }
     py::array_t<int32_t> out(shape_to_py(src.shape_));
     if (src.device_ == Device::CUDA) {
-        CUDA_CHECK(cudaMemcpyAsync(out.mutable_data(), src.data_, src.nbytes_, cudaMemcpyDeviceToHost, py_default_stream().s));
-        py_default_stream().synchronize();
+        Stream stream = py_current_stream();
+        CUDA_CHECK(cudaMemcpyAsync(out.mutable_data(), src.data_, src.nbytes_, cudaMemcpyDeviceToHost, stream.s));
+        stream.synchronize();
     } else {
         std::memcpy(out.mutable_data(), src.data_, src.nbytes_);
     }
@@ -270,8 +280,9 @@ inline float tensor_item_float(const Tensor& src) {
     }
     float out = 0.0f;
     if (src.device_ == Device::CUDA) {
-        CUDA_CHECK(cudaMemcpyAsync(&out, src.data_, sizeof(float), cudaMemcpyDeviceToHost, py_default_stream().s));
-        py_default_stream().synchronize();
+        Stream stream = py_current_stream();
+        CUDA_CHECK(cudaMemcpyAsync(&out, src.data_, sizeof(float), cudaMemcpyDeviceToHost, stream.s));
+        stream.synchronize();
     } else {
         std::memcpy(&out, src.data_, sizeof(float));
     }
@@ -287,8 +298,9 @@ inline int32_t tensor_item_int32(const Tensor& src) {
     }
     int32_t out = 0;
     if (src.device_ == Device::CUDA) {
-        CUDA_CHECK(cudaMemcpyAsync(&out, src.data_, sizeof(int32_t), cudaMemcpyDeviceToHost, py_default_stream().s));
-        py_default_stream().synchronize();
+        Stream stream = py_current_stream();
+        CUDA_CHECK(cudaMemcpyAsync(&out, src.data_, sizeof(int32_t), cudaMemcpyDeviceToHost, stream.s));
+        stream.synchronize();
     } else {
         std::memcpy(&out, src.data_, sizeof(int32_t));
     }

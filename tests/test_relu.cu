@@ -107,7 +107,7 @@ TEST(ReluForward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_THROW((void)relu_forward(x, &non_default_stream), std::invalid_argument);
+    EXPECT_NO_THROW((void)relu_forward(x, &non_default_stream));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
@@ -166,7 +166,7 @@ TEST(ReluBackward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_THROW((void)relu_backward(dY, out.ctx, &non_default_stream), std::invalid_argument);
+    EXPECT_NO_THROW((void)relu_backward(dY, out.ctx, &non_default_stream));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }

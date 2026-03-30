@@ -42,7 +42,8 @@ Tensor Tensor::matmul(const Tensor& other) const {
         throw std::invalid_argument("tensor.h: matmul requires tensors on the same device");
     }
     if (device_ == Device::CUDA) {
-        throw std::invalid_argument("tensor.h: matmul on CUDA device requires a stream and cuBLAS handle");
+        Stream stream = current_stream();
+        return matmul(other, stream, current_cublas_handle());
     }
     // For CPU tensors, we can implement a simple matmul (not optimized)
     Tensor result = Tensor::empty({shape_[0], other.shape_[1]}, dtype_, device_);
@@ -123,9 +124,7 @@ Tensor Tensor::matmul(const Tensor& other, Stream& stream, CublasHandle& cublas_
     if (dtype_ != other.dtype_) {
         throw std::invalid_argument("tensor.h: matmul requires tensors of the same data type");
     }
-    if (stream.s != cudaStream_t(0)) {
-        throw std::invalid_argument("tensor.h: matmul requires a default stream");
-    }
+    assert_non_default_stream(stream.s, "tensor.h: matmul");
     if (this->device_ != other.device_) {
         throw std::invalid_argument("tensor.h: matmul requires tensors on the same device");
     }
@@ -160,10 +159,12 @@ Tensor Tensor::matmul(const Tensor& other, Stream& stream, CublasHandle& cublas_
     if (dtype_ == DType::F32) {
         float alpha = 1.0f;
         float beta = 0.0f;
+        CUBLAS_CHECK(cublasSetStream(cublas_handle.handle, stream.s));
         status = cublasSgemm(cublas_handle.handle, opA, opB, n_out, m_out, k_out, &alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, &beta, static_cast<float*>(C), ldc);
     } else { // DType::F16
         __half alpha = __float2half(1.0f);
         __half beta = __float2half(0.0f);
+        CUBLAS_CHECK(cublasSetStream(cublas_handle.handle, stream.s));
         status = cublasHgemm(cublas_handle.handle, opA, opB, n_out, m_out, k_out, &alpha, static_cast<const __half*>(A), lda, static_cast<const __half*>(B), ldb, &beta, static_cast<__half*>(C), ldc);
     }
     if (status != CUBLAS_STATUS_SUCCESS) {
@@ -179,9 +180,7 @@ Tensor Tensor::random_uniform(std::vector<int64_t> shape,
                               DType dtype,
                               Device device,
                               Stream& stream) {
-    if (stream.s != cudaStream_t(0)) {
-        throw std::invalid_argument("tensor.h: random_uniform requires the default stream at this phase.");
-    }
+    assert_non_default_stream(stream.s, "tensor.h: random_uniform");
     if (dtype != DType::F32) {
         throw std::invalid_argument("tensor.h: random_uniform currently supports only F32.");
     }
@@ -216,6 +215,6 @@ Tensor Tensor::random_uniform(std::vector<int64_t> shape,
     if (device != Device::CUDA) {
         throw std::invalid_argument("tensor.h: random_uniform currently supports only CUDA tensors.");
     }
-    Stream current(cudaStream_t(0));
+    Stream current = current_stream();
     return random_uniform(std::move(shape), low, high, seed, dtype, device, current);
 }

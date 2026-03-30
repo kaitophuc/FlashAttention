@@ -11,7 +11,8 @@ std::pair<std::shared_ptr<Tensor>, LinearContextPy> linear_forward_py(
     }
 
     const Tensor* b_ptr = b ? b.get() : nullptr;
-    LinearResults out = linear_forward(*x, *w, b_ptr, &py_default_stream(), py_default_cublas_handle());
+    Stream stream = py_current_stream();
+    LinearResults out = linear_forward(*x, *w, b_ptr, &stream, py_default_cublas_handle());
 
     LinearContextPy ctx;
     ctx.ctx = out.ctx;
@@ -33,7 +34,8 @@ LinearGradsPy linear_backward_py(
         throw std::invalid_argument("ktorch.linear_backward: dY must not be None.");
     }
 
-    LinearGrads grads = linear_backward(*dY, ctx.ctx, needs_dX, needs_dW, needs_db, &py_default_stream(), py_default_cublas_handle());
+    Stream stream = py_current_stream();
+    LinearGrads grads = linear_backward(*dY, ctx.ctx, needs_dX, needs_dW, needs_db, &stream, py_default_cublas_handle());
 
     LinearGradsPy out;
     out.dX = optional_tensor_to_shared(std::move(grads.dX));
@@ -72,4 +74,3 @@ void bind_linear(py::module_& m) {
           py::arg("needs_dW") = true,
           py::arg("needs_db") = true);
 }
-

@@ -11,7 +11,8 @@ std::pair<std::shared_ptr<Tensor>, LayerNormContextPy> layernorm_forward_py(
         throw std::invalid_argument("ktorch.layernorm_forward: x, gamma, beta must not be None.");
     }
 
-    LayerNormResults out = layernorm_forward(*x, *gamma, *beta, eps, &py_default_stream());
+    Stream stream = py_current_stream();
+    LayerNormResults out = layernorm_forward(*x, *gamma, *beta, eps, &stream);
 
     LayerNormContextPy ctx(std::move(out.ctx), x, gamma);
     return {make_tensor_shared(std::move(out.Y)), std::move(ctx)};
@@ -27,7 +28,8 @@ LayerNormGradsPy layernorm_backward_py(
         throw std::invalid_argument("ktorch.layernorm_backward: dY must not be None.");
     }
 
-    LayerNormGrads grads = layernorm_backward(*dY, ctx.ctx, needs_dX, needs_dgamma, needs_dbeta, &py_default_stream());
+    Stream stream = py_current_stream();
+    LayerNormGrads grads = layernorm_backward(*dY, ctx.ctx, needs_dX, needs_dgamma, needs_dbeta, &stream);
 
     LayerNormGradsPy out;
     out.dX = optional_tensor_to_shared(std::move(grads.dX));

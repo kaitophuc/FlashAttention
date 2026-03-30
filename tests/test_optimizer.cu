@@ -25,7 +25,7 @@ TEST(OptimizerSgdUpdate, UpdatesInPlaceSmallTensor) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     Tensor param({2, 3}, DType::F32, Device::CUDA, stream);
     Tensor grad({2, 3}, DType::F32, Device::CUDA, stream);
 
@@ -48,7 +48,7 @@ TEST(OptimizerSgdUpdate, UpdatesInPlaceGridStrideCoverage) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     constexpr int64_t kNumel = 4097;
     Tensor param({kNumel}, DType::F32, Device::CUDA, stream);
     Tensor grad({kNumel}, DType::F32, Device::CUDA, stream);
@@ -72,7 +72,7 @@ TEST(OptimizerSgdUpdate, RejectsInvalidInputs) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     Tensor p_f32({4}, DType::F32, Device::CUDA, stream);
     Tensor g_f32({4}, DType::F32, Device::CUDA, stream);
     Tensor g_f16({4}, DType::F16, Device::CUDA, stream);

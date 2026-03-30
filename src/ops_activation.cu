@@ -106,13 +106,11 @@ __global__ void relu_backward_vec4_kernel(
 }
 
 ReluResults relu_forward(const Tensor& X, Stream* stream) {
-    // Check input shapes and dtypes. At this point, we only support float32 tensors and default streams.
+    // Check input shapes and dtypes.
     if (stream == nullptr) {
         throw std::invalid_argument("ops_activation.cu: Relu_forward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_activation.cu: Relu_forward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_activation.cu: Relu_forward");
     if (X.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_activation.cu: Relu_forward: Only float32 tensors are supported.");
     }
@@ -155,13 +153,11 @@ ReluResults relu_forward(const Tensor& X, Stream* stream) {
 }
 
 ReluGrads relu_backward(const Tensor& dY, const ReluCtx& ctx, Stream* stream) {
-    // Check input shapes and dtypes. At this point, we only support float32 tensors and default streams.
+    // Check input shapes and dtypes.
     if (stream == nullptr) {
         throw std::invalid_argument("ops_activation.cu: Relu_backward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_activation.cu: Relu_backward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_activation.cu: Relu_backward");
     if (ctx.X == nullptr) {
         throw std::invalid_argument("ops_activation.cu: Relu_backward: ctx.X cannot be null.");
     }

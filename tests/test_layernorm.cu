@@ -123,7 +123,7 @@ TEST(LayerNormForward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_THROW((void)layernorm_forward(x, gamma, beta, 1e-5f, &non_default_stream), std::invalid_argument);
+    EXPECT_NO_THROW((void)layernorm_forward(x, gamma, beta, 1e-5f, &non_default_stream));
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
 
@@ -232,7 +232,7 @@ TEST(LayerNormBackward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_THROW((void)layernorm_backward(dY, out.ctx, true, true, true, &non_default_stream), std::invalid_argument);
+    EXPECT_NO_THROW((void)layernorm_backward(dY, out.ctx, true, true, true, &non_default_stream));
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
 

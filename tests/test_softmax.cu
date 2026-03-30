@@ -131,7 +131,7 @@ TEST(SoftmaxForward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_THROW((void)softmax_forward(x, &non_default_stream), std::invalid_argument);
+    EXPECT_NO_THROW((void)softmax_forward(x, &non_default_stream));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
@@ -193,7 +193,7 @@ TEST(SoftmaxBackward, RejectsNonDefaultStream) {
     non_default_stream.s = raw_non_default;
     non_default_stream.owns_ = false;
 
-    EXPECT_THROW((void)softmax_backward(dY, y, &non_default_stream), std::invalid_argument);
+    EXPECT_NO_THROW((void)softmax_backward(dY, y, &non_default_stream));
 
     CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }

@@ -65,7 +65,7 @@ TEST(TensorCorrectness, H2DAndD2HRoundTrip) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
 
     constexpr int64_t kN = 1LL << 20;  // 1M floats
     Tensor h({kN}, DType::F32, Device::CPU);
@@ -96,7 +96,7 @@ TEST(TensorCorrectness, CloneCudaToCpu_NoSegfaultAndMatches) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
 
     constexpr int64_t kN = 1LL << 20;  // 1M floats
     Tensor h_src({kN}, DType::F32, Device::CPU);
@@ -123,7 +123,7 @@ TEST(TensorCorrectness, CloneCpuToCudaToCpu_RoundTrip) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
 
     constexpr int64_t kN = 1LL << 20;  // 1M floats
     Tensor h0({kN}, DType::F32, Device::CPU);
@@ -149,7 +149,7 @@ TEST(TensorCorrectness, ToVectorFromCuda_IsSynchronized) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
 
     constexpr int64_t kN = 1LL << 20;  // 1M floats
     Tensor h_src({kN}, DType::F32, Device::CPU);
@@ -177,7 +177,7 @@ TEST(TensorCorrectness, RejectsCpuZerosWithStreamArgument) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     EXPECT_THROW((void)Tensor::zeros({128}, DType::F32, Device::CPU, stream), std::invalid_argument);
 }
 
@@ -186,7 +186,7 @@ TEST(TensorCorrectness, RejectsCpuToVectorWithStreamArgument) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     Tensor h({128}, DType::F32, Device::CPU);
     EXPECT_THROW((void)h.to_vector<float>(stream), std::invalid_argument);
 }
@@ -196,7 +196,7 @@ TEST(TensorCorrectness, RejectsCpuDestinationCopyFromWithStreamArgument) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     Tensor src({128}, DType::F32, Device::CPU);
     Tensor dst({128}, DType::F32, Device::CPU);
     EXPECT_THROW((void)dst.copy_from(src, stream), std::invalid_argument);
@@ -289,15 +289,15 @@ TEST(TensorMatmul, CpuRejectsInvalidInputs) {
     EXPECT_THROW((void)b_2d.matmul(i32_rhs), std::invalid_argument);
 }
 
-TEST(TensorMatmul, CpuApiRejectsCudaTensorWithoutHandle) {
+TEST(TensorMatmul, CpuApiUsesCurrentStreamForCudaMatmul) {
     if (!fa_test::cuda_available()) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     Tensor lhs({2, 3}, DType::F32, Device::CUDA, stream);
     Tensor rhs({3, 2}, DType::F32, Device::CUDA, stream);
-    EXPECT_THROW((void)lhs.matmul(rhs), std::invalid_argument);
+    EXPECT_NO_THROW((void)lhs.matmul(rhs));
 }
 
 TEST(TensorMatmul, CudaF32MatchesReference) {
@@ -323,7 +323,7 @@ TEST(TensorMatmul, CudaF32MatchesReference) {
     lhs_h.copy_from(a);
     rhs_h.copy_from(b);
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     CublasHandle handle;
     Tensor lhs_d = lhs_h.clone(Device::CUDA, stream);
     Tensor rhs_d = rhs_h.clone(Device::CUDA, stream);
@@ -366,7 +366,7 @@ TEST(TensorMatmul, CudaF16MatchesReferenceForEdgeShape) {
     lhs_h.copy_from(a_f16);
     rhs_h.copy_from(b_f16);
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     CublasHandle handle;
     Tensor lhs_d = lhs_h.clone(Device::CUDA, stream);
     Tensor rhs_d = rhs_h.clone(Device::CUDA, stream);
@@ -386,7 +386,7 @@ TEST(TensorMatmul, CudaRejectsInvalidInputs) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     CublasHandle handle;
 
     Tensor lhs({2, 3}, DType::F32, Device::CUDA, stream);
@@ -401,19 +401,24 @@ TEST(TensorMatmul, CudaRejectsInvalidInputs) {
     EXPECT_THROW((void)lhs_1d.matmul(lhs, stream, handle), std::invalid_argument);
 }
 
-TEST(TensorMatmul, CudaRejectsNonDefaultStream) {
+TEST(TensorMatmul, CudaAcceptsNonDefaultStream) {
     if (!fa_test::cuda_available()) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
-    Stream stream(cudaStream_t(0));
+    Stream stream;
     CublasHandle handle;
     Tensor lhs({2, 2}, DType::F32, Device::CUDA, stream);
     Tensor rhs({2, 2}, DType::F32, Device::CUDA, stream);
 
-    Stream fake_stream(cudaStream_t(0));
-    fake_stream.s = reinterpret_cast<cudaStream_t>(1);
-    EXPECT_THROW((void)lhs.matmul(rhs, fake_stream, handle), std::invalid_argument);
+    cudaStream_t raw_non_default = nullptr;
+    CUDA_CHECK(cudaStreamCreateWithFlags(&raw_non_default, cudaStreamNonBlocking));
+    Stream non_default_stream;
+    non_default_stream.s = raw_non_default;
+    non_default_stream.owns_ = false;
+
+    EXPECT_NO_THROW((void)lhs.matmul(rhs, non_default_stream, handle));
+    CUDA_CHECK(cudaStreamDestroy(raw_non_default));
 }
 
 

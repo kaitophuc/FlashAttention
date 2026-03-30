@@ -59,9 +59,7 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
     if (stream == nullptr) {
         throw std::invalid_argument("ops_linear.cu: Linear_forward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_linear.cu: Linear_forward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_linear.cu: Linear_forward");
     if (X.dtype_ != DType::F32 || W.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_linear.cu: Linear_forward: Only float32 tensors are supported.");
     }
@@ -140,9 +138,7 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
     if (stream == nullptr) {
         throw std::invalid_argument("ops_linear.cu: Linear_forward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_linear.cu: Linear_forward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_linear.cu: Linear_forward");
     if (X.dtype_ != DType::F32 || W.dtype_ != DType::F32) {
         throw std::invalid_argument("ops_linear.cu: Linear_forward: Only float32 tensors are supported.");
     }
@@ -181,6 +177,7 @@ LinearResults linear_forward(const Tensor& X, const Tensor& W, const Tensor* b, 
 
     cublasLtMatmulDesc_t operation_desc;
     CUBLAS_CHECK(cublasLtMatmulDescCreate(&operation_desc, CUBLAS_COMPUTE_32F, CUDA_R_32F));
+    CUBLAS_CHECK(cublasSetStream(handle.get(), stream->s));
     
     // Perform matrix multiplication Y = X * W^T.
     // Map row-major tensors into column-major descriptors:
@@ -265,9 +262,7 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
     if (stream == nullptr) {
         throw std::invalid_argument("ops_linear.cu: Linear_backward: Stream pointer cannot be null.");
     }
-    if (stream->s != cudaStream_t(0)) {
-        throw std::invalid_argument("ops_linear.cu: Linear_backward: Only the default stream is supported at this phase.");
-    }
+    assert_non_default_stream(stream->s, "ops_linear.cu: Linear_backward");
     if (ctx.X == nullptr || ctx.W == nullptr) {
         throw std::invalid_argument("ops_linear.cu: Linear_backward: LinearCtx contains null tensor pointers.");
     }
@@ -321,6 +316,7 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
 
         float alpha = 1.0f;
         float beta = 0.0f;
+        CUBLAS_CHECK(cublasSetStream(handle.get(), stream->s));
         CUBLAS_CHECK(cublasSgemm(handle.get(), opA, opB, m_out, n_out, k_out,
                                     &alpha,
                                     static_cast<const float*>(ctx.W->data_), la,
@@ -343,6 +339,7 @@ LinearGrads linear_backward(const Tensor& dY, const LinearCtx& ctx, bool needs_d
         int lc = static_cast<int>(ctx.X->shape_[1]);
         float alpha = 1.0f;
         float beta = 0.0f;
+        CUBLAS_CHECK(cublasSetStream(handle.get(), stream->s));
         CUBLAS_CHECK(cublasSgemm(handle.get(), opA, opB, m_out, n_out, k_out,
                                     &alpha,
                                     static_cast<const float*>(ctx.X->data_), la,

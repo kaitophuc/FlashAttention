@@ -29,12 +29,35 @@ def tensor_from_list_int32(shape, values, device=Device.CUDA):
     return _C.tensor_from_list_int32(shape, values, device)
 
 
-def default_stream() -> Stream:
-    return _C.default_stream()
+def current_stream() -> Stream:
+    return _C.current_stream()
 
 
-def synchronize() -> None:
-    _C.synchronize()
+def set_current_stream(stream: Stream) -> None:
+    _C.set_current_stream(stream)
+
+
+def stream_from_pool(idx: int) -> Stream:
+    return _C.stream_from_pool(idx)
+
+
+def next_stream() -> Stream:
+    return _C.next_stream()
+
+
+def stream_pool_size() -> int:
+    return _C.stream_pool_size()
+
+
+def stream_guard(stream: Stream):
+    return _C.stream_guard(stream)
+
+
+def synchronize(stream: Stream | None = None) -> None:
+    if stream is None:
+        _C.synchronize()
+    else:
+        stream.synchronize()
 
 
 def from_numpy(array: Any, device=Device.CUDA):
