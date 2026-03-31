@@ -36,121 +36,93 @@ def set_seed(seed: int, torch) -> None:
 def configure_torch_cuda(torch) -> None:
     if not torch.cuda.is_available():
         return
-
-    # Reasonable performance defaults for CUDA baseline runs.
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.set_float32_matmul_precision("high")
 
 
-def init_params(in_dim: int, hidden: int, out_dim: int, device, torch):
-    w1 = torch.empty(hidden, in_dim, device=device).uniform_(-0.05, 0.05).requires_grad_(True)
-    b1 = torch.zeros(hidden, device=device, requires_grad=True)
-    w2 = torch.empty(out_dim, hidden, device=device).uniform_(-0.05, 0.05).requires_grad_(True)
-    b2 = torch.zeros(out_dim, device=device, requires_grad=True)
-    return w1, b1, w2, b2
+def build_model(in_dim: int, hidden: int, out_dim: int, device, torch):
+    import torch.nn as nn
+
+    model = nn.Sequential(
+        nn.Flatten(),
+        nn.Linear(in_dim, hidden),
+        nn.ReLU(),
+        nn.Linear(hidden, out_dim),
+    ).to(device=device)
+
+    with torch.no_grad():
+        model[1].weight.uniform_(-0.05, 0.05)
+        model[1].bias.zero_()
+        model[3].weight.uniform_(-0.05, 0.05)
+        model[3].bias.zero_()
+
+    return model
 
 
-def make_loader(dataset, batch_size: int, shuffle: bool, seed: int, use_cuda: bool, torch):
-    generator = torch.Generator()
-    generator.manual_seed(seed)
-
-    num_workers = 4 if use_cuda else 0
-    return torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        drop_last=False,
-        num_workers=num_workers,
-        pin_memory=use_cuda,
-        persistent_workers=(num_workers > 0),
-        generator=generator,
-    )
-
-
-def move_batch(images, labels, device, use_cuda: bool):
-    if use_cuda:
-        images = images.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
-    else:
-        images = images.to(device)
-        labels = labels.to(device)
-    return images, labels
-
-
-def forward_logits(images, w1, b1, w2, b2, F):
-    x = images.view(images.size(0), -1)
-    z1 = F.linear(x, w1, b1)
-    a1 = F.relu(z1)
-    logits = F.linear(a1, w2, b2)
-    return logits
-
-
-def train_step(batch, w1, b1, w2, b2, optimizer, device, use_cuda: bool, F):
-    images, labels = batch
-    images, labels = move_batch(images, labels, device, use_cuda)
-
+def train_step_device_tensors(images, labels, model, optimizer, F):
     optimizer.zero_grad(set_to_none=True)
-    logits = forward_logits(images, w1, b1, w2, b2, F)
+    logits = model(images)
     loss = F.cross_entropy(logits, labels)
     loss.backward()
     optimizer.step()
 
 
-def evaluate(test_loader, w1, b1, w2, b2, device, max_batches: int, use_cuda: bool, torch, F) -> Tuple[float, float]:
+def evaluate_device_tensors(test_images, test_labels, model, batch_size: int, max_batches: int, torch, F) -> Tuple[float, float]:
     total_loss = 0.0
     total_correct = 0
     total_seen = 0
+    n = int(test_images.size(0))
+    batches_seen = 0
 
+    model.eval()
     with torch.no_grad():
-        for batch_idx, (images, labels) in enumerate(test_loader):
-            if max_batches > 0 and batch_idx >= max_batches:
+        for start in range(0, n, batch_size):
+            if max_batches > 0 and batches_seen >= max_batches:
                 break
-
-            images, labels = move_batch(images, labels, device, use_cuda)
-            logits = forward_logits(images, w1, b1, w2, b2, F)
-
+            end = min(start + batch_size, n)
+            images = test_images[start:end]
+            labels = test_labels[start:end]
+            logits = model(images)
             loss = F.cross_entropy(logits, labels)
             preds = logits.argmax(dim=1)
-
             bsz = images.size(0)
             total_loss += loss.item() * bsz
             total_correct += (preds == labels).sum().item()
             total_seen += bsz
+            batches_seen += 1
 
     avg_loss = total_loss / max(total_seen, 1)
     acc = total_correct / max(total_seen, 1)
     return avg_loss, acc
 
 
-def next_batch(it, loader):
-    try:
-        return next(it), it
-    except StopIteration:
-        it = iter(loader)
-        return next(it), it
+def next_index_window(offset: int, total: int, batch_size: int):
+    start = offset
+    end = min(offset + batch_size, total)
+    nxt = 0 if end >= total else end
+    return start, end, nxt
 
 
-def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: int, device, use_cuda: bool, torch, F) -> float:
-    w1, b1, w2, b2 = init_params(in_dim, hidden, out_dim, device, torch)
-    optimizer = torch.optim.SGD([w1, b1, w2, b2], lr=args.lr)
+def run_step_benchmark(train_images, train_labels, args, in_dim: int, hidden: int, out_dim: int, device, torch, F) -> float:
+    model = build_model(in_dim, hidden, out_dim, device, torch)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
 
-    loader_it = iter(train_loader)
+    total = int(train_images.size(0))
+    cursor = 0
     measured: List[float] = []
 
     total_steps = args.benchmark_warmup + args.benchmark_steps
     for step in range(total_steps):
-        batch, loader_it = next_batch(loader_it, train_loader)
+        start, end, cursor = next_index_window(cursor, total, args.batch_size)
+        images = train_images[start:end]
+        labels = train_labels[start:end]
 
-        if use_cuda:
-            torch.cuda.synchronize(device)
+        torch.cuda.synchronize(device)
         t0 = time.perf_counter()
-
-        train_step(batch, w1, b1, w2, b2, optimizer, device, use_cuda, F)
-
-        if use_cuda:
-            torch.cuda.synchronize(device)
+        train_step_device_tensors(images, labels, model, optimizer, F)
+        torch.cuda.synchronize(device)
         dt = time.perf_counter() - t0
 
         if step >= args.benchmark_warmup:
@@ -159,9 +131,8 @@ def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: in
     return statistics.median(measured)
 
 
-def run_compare_benchmark(train_ds, args, in_dim: int, hidden: int, out_dim: int, device, use_cuda: bool, torch, F) -> None:
-    loader = make_loader(train_ds, batch_size=args.batch_size, shuffle=False, seed=args.seed, use_cuda=use_cuda, torch=torch)
-    median = run_step_benchmark(loader, args, in_dim, hidden, out_dim, device, use_cuda, torch, F)
+def run_compare_benchmark(train_images, train_labels, args, in_dim: int, hidden: int, out_dim: int, device, torch, F) -> None:
+    median = run_step_benchmark(train_images, train_labels, args, in_dim, hidden, out_dim, device, torch, F)
     print("[benchmark] train-step median (batch_size=%d, warmup=%d, steps=%d)" % (
         args.batch_size,
         args.benchmark_warmup,
@@ -183,8 +154,9 @@ def main() -> None:
     set_seed(args.seed, torch)
     configure_torch_cuda(torch)
 
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda" if use_cuda else "cpu")
+    if not torch.cuda.is_available():
+        raise RuntimeError("This script is CUDA-only. No CUDA device detected.")
+    device = torch.device("cuda")
 
     transform = transforms.ToTensor()
     train_ds = datasets.FashionMNIST(root=args.data_root, train=True, download=True, transform=transform)
@@ -194,32 +166,43 @@ def main() -> None:
     hidden = args.hidden_dim
     out_dim = 10
 
+    train_images = train_ds.data.to(device=device, dtype=torch.float32).unsqueeze(1).div_(255.0)
+    train_labels = train_ds.targets.to(device=device, dtype=torch.long)
+    test_images = test_ds.data.to(device=device, dtype=torch.float32).unsqueeze(1).div_(255.0)
+    test_labels = test_ds.targets.to(device=device, dtype=torch.long)
+
     if args.benchmark_compare:
-        run_compare_benchmark(train_ds, args, in_dim, hidden, out_dim, device, use_cuda, torch, F)
+        run_compare_benchmark(train_images, train_labels, args, in_dim, hidden, out_dim, device, torch, F)
         return
 
-    train_loader = make_loader(train_ds, batch_size=args.batch_size, shuffle=True, seed=args.seed, use_cuda=use_cuda, torch=torch)
-    test_loader = make_loader(test_ds, batch_size=args.batch_size, shuffle=False, seed=args.seed, use_cuda=use_cuda, torch=torch)
+    model = build_model(in_dim, hidden, out_dim, device, torch)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
 
-    w1, b1, w2, b2 = init_params(in_dim, hidden, out_dim, device, torch)
-    optimizer = torch.optim.SGD([w1, b1, w2, b2], lr=args.lr)
-
+    n_train = int(train_images.size(0))
     train_start = time.perf_counter()
 
-    for epoch in range(args.epochs):
-        for batch_idx, batch in enumerate(train_loader):
+    for _epoch in range(args.epochs):
+        model.train()
+        order = torch.randperm(n_train, device=device)
+        batch_idx = 0
+        for start in range(0, n_train, args.batch_size):
             if args.max_train_batches > 0 and batch_idx >= args.max_train_batches:
                 break
+            end = min(start + args.batch_size, n_train)
+            idx = order[start:end]
+            images = train_images.index_select(0, idx)
+            labels = train_labels.index_select(0, idx)
+            train_step_device_tensors(images, labels, model, optimizer, F)
+            batch_idx += 1
 
-            train_step(batch, w1, b1, w2, b2, optimizer, device, use_cuda, F)
-
-    if use_cuda:
-        torch.cuda.synchronize(device)
+    torch.cuda.synchronize(device)
 
     train_end = time.perf_counter()
     print(f"Training completed in {train_end - train_start:.2f} seconds.")
 
-    test_loss, test_acc = evaluate(test_loader, w1, b1, w2, b2, device, args.max_test_batches, use_cuda, torch, F)
+    test_loss, test_acc = evaluate_device_tensors(
+        test_images, test_labels, model, args.batch_size, args.max_test_batches, torch, F
+    )
     print(f"Final test loss: {test_loss:.4f}, test accuracy: {test_acc:.4f}")
 
 

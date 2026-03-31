@@ -2,12 +2,10 @@
 import argparse
 import statistics
 import time
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import ktorch
 from ktorch import ops
-from ktorch.data import DataLoader
-from ktorch.data.adapters import from_torch_dataset
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,6 +58,13 @@ def next_batch(it, loader):
         return next(it), it
 
 
+def torch_batch_to_ktorch(batch, use_cuda: bool, torch):
+    images, labels = batch
+    x = ktorch.from_torch(images, device=ktorch.Device.CUDA)
+    y = ktorch.from_torch(labels, device=ktorch.Device.CUDA)
+    return x, y
+
+
 def train_step(batch, w1, b1, w2, b2, in_dim: int, lr: float):
     x, labels_t = batch
     bsz = int(x.shape[0])
@@ -86,7 +91,7 @@ def train_step(batch, w1, b1, w2, b2, in_dim: int, lr: float):
     return loss_t, correct_t
 
 
-def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, max_batches: int) -> Tuple[float, float]:
+def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, max_batches: int, use_cuda: bool, torch) -> Tuple[float, float]:
     total_loss = 0.0
     total_correct = 0
     total_seen = 0
@@ -95,7 +100,7 @@ def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, max_batches: int) -> Tupl
         if max_batches > 0 and batch_idx >= max_batches:
             break
 
-        x, labels_t = batch
+        x, labels_t = torch_batch_to_ktorch(batch, use_cuda, torch)
         bsz = int(x.shape[0])
         x.view([bsz, in_dim])
 
@@ -117,19 +122,23 @@ def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, max_batches: int) -> Tupl
     return avg_loss, acc
 
 
-def make_ktorch_loader(dataset, batch_size: int, shuffle: bool, seed: int):
-    ds = from_torch_dataset(dataset)
-    return DataLoader(
-        ds,
+def make_torch_loader(dataset, batch_size: int, shuffle: bool, seed: int, use_cuda: bool, torch):
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    num_workers = 4 if use_cuda else 0
+    return torch.utils.data.DataLoader(
+        dataset,
         batch_size=batch_size,
         shuffle=shuffle,
         drop_last=False,
-        seed=seed,
-        device=ktorch.Device.CUDA,
+        num_workers=num_workers,
+        pin_memory=use_cuda,
+        persistent_workers=(num_workers > 0),
+        generator=generator,
     )
 
 
-def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: int) -> float:
+def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: int, use_cuda: bool, torch) -> float:
     w1, b1, w2, b2 = init_model_params(args.seed, in_dim, hidden, out_dim)
     loader_it = iter(train_loader)
     measured: List[float] = []
@@ -137,8 +146,9 @@ def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: in
     total_steps = args.benchmark_warmup + args.benchmark_steps
     for step in range(total_steps):
         batch, loader_it = next_batch(loader_it, train_loader)
+        kt_batch = torch_batch_to_ktorch(batch, use_cuda, torch)
         t0 = time.perf_counter()
-        train_step(batch, w1, b1, w2, b2, in_dim, args.lr, compute_metrics=False)
+        train_step(kt_batch, w1, b1, w2, b2, in_dim, args.lr)
         dt = time.perf_counter() - t0
         if step >= args.benchmark_warmup:
             measured.append(dt)
@@ -147,8 +157,13 @@ def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: in
 
 
 def run_compare_benchmark(train_ds, args, in_dim: int, hidden: int, out_dim: int) -> None:
-    loader = make_ktorch_loader(train_ds, batch_size=args.batch_size, shuffle=False, seed=args.seed)
-    median = run_step_benchmark(loader, args, in_dim, hidden, out_dim)
+    try:
+        import torch
+    except Exception as e:
+        raise RuntimeError("Benchmark mode requires torch installed.") from e
+    use_cuda = torch.cuda.is_available()
+    loader = make_torch_loader(train_ds, batch_size=args.batch_size, shuffle=False, seed=args.seed, use_cuda=use_cuda, torch=torch)
+    median = run_step_benchmark(loader, args, in_dim, hidden, out_dim, use_cuda, torch)
     print("[benchmark] train-step median (batch_size=%d, warmup=%d, steps=%d)" % (
         args.batch_size,
         args.benchmark_warmup,
@@ -167,6 +182,7 @@ def main() -> None:
         raise RuntimeError("This script requires torch and torchvision installed.") from e
 
     torch.manual_seed(args.seed)
+    use_cuda = torch.cuda.is_available()
 
     transform = transforms.ToTensor()
     train_ds = datasets.FashionMNIST(root=args.data_root, train=True, download=True, transform=transform)
@@ -180,8 +196,8 @@ def main() -> None:
         run_compare_benchmark(train_ds, args, in_dim, hidden, out_dim)
         return
 
-    train_loader = make_ktorch_loader(train_ds, batch_size=args.batch_size, shuffle=True, seed=args.seed)
-    test_loader = make_ktorch_loader(test_ds, batch_size=args.batch_size, shuffle=False, seed=args.seed)
+    train_loader = make_torch_loader(train_ds, batch_size=args.batch_size, shuffle=True, seed=args.seed, use_cuda=use_cuda, torch=torch)
+    test_loader = make_torch_loader(test_ds, batch_size=args.batch_size, shuffle=False, seed=args.seed, use_cuda=use_cuda, torch=torch)
 
     w1, b1, w2, b2 = init_model_params(args.seed, in_dim, hidden, out_dim)
 
@@ -191,9 +207,10 @@ def main() -> None:
         for batch_idx, batch in enumerate(train_loader):
             if args.max_train_batches > 0 and batch_idx >= args.max_train_batches:
                 break
+            kt_batch = torch_batch_to_ktorch(batch, use_cuda, torch)
 
             loss_t, correct_t = train_step(
-                batch,
+                kt_batch,
                 w1,
                 b1,
                 w2,
@@ -210,7 +227,7 @@ def main() -> None:
     train_end = time.perf_counter()
     print(f"Training completed in {train_end - train_start:.2f} seconds.")
 
-    test_loss, test_acc = evaluate(test_loader, w1, b1, w2, b2, in_dim, args.max_test_batches)
+    test_loss, test_acc = evaluate(test_loader, w1, b1, w2, b2, in_dim, args.max_test_batches, use_cuda, torch)
     print(f"Final test loss: {test_loss:.4f}, test accuracy: {test_acc:.4f}")
 
 

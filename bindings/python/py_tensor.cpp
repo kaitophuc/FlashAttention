@@ -33,6 +33,10 @@ void bind_tensor(py::module_& m) {
              "Fast path: copy from contiguous host float32 buffer-like object.")
         .def("copy_from_buffer_int32", &tensor_copy_from_buffer_int32, py::arg("values"),
              "Fast path: copy from contiguous host int32 buffer-like object.")
+        .def("copy_from_torch_float", &tensor_copy_from_torch_float, py::arg("values"),
+             "Fast path: copy from contiguous torch float32 tensor.")
+        .def("copy_from_torch_int32", &tensor_copy_from_torch_int32, py::arg("values"),
+             "Fast path: copy from contiguous torch int32 tensor.")
         .def("to_numpy_float", &tensor_to_numpy_float,
              "Fast path: copy tensor data into a NumPy float32 array.")
         .def("to_numpy_int32", &tensor_to_numpy_int32,

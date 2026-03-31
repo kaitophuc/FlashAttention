@@ -241,6 +241,93 @@ inline void tensor_copy_from_buffer_int32(Tensor& dst, const py::object& obj) {
     }
 }
 
+inline py::object ensure_torch_tensor(const py::object& obj, const char* fn_name) {
+    try {
+        py::module_ torch = py::module_::import("torch");
+        py::object torch_tensor_type = torch.attr("Tensor");
+        if (!py::isinstance(obj, torch_tensor_type)) {
+            throw std::invalid_argument(std::string(fn_name) + ": expected a torch.Tensor.");
+        }
+    } catch (const py::error_already_set&) {
+        throw std::runtime_error(std::string(fn_name) + ": torch is required.");
+    }
+    return obj;
+}
+
+inline void tensor_copy_from_torch_float(Tensor& dst, const py::object& obj) {
+    if (dst.dtype_ != DType::F32) {
+        throw std::invalid_argument("ktorch: copy_from_torch_float only supports F32 tensors.");
+    }
+    py::object t = ensure_torch_tensor(obj, "ktorch.copy_from_torch_float");
+    if (!t.attr("is_contiguous")().cast<bool>()) {
+        throw std::invalid_argument("ktorch.copy_from_torch_float: input tensor must be contiguous.");
+    }
+    if (t.attr("numel")().cast<size_t>() != dst.numel_) {
+        throw std::invalid_argument("ktorch.copy_from_torch_float: input element count must match tensor.numel().");
+    }
+    const std::string src_device_type = py::str(t.attr("device").attr("type"));
+    const void* src_ptr = reinterpret_cast<const void*>(t.attr("data_ptr")().cast<uintptr_t>());
+
+    if (dst.device_ == Device::CUDA) {
+        Stream stream = py_current_stream();
+        if (src_device_type == "cuda") {
+            CUDA_CHECK(cudaMemcpyAsync(dst.data_, src_ptr, dst.nbytes_, cudaMemcpyDeviceToDevice, stream.s));
+        } else if (src_device_type == "cpu") {
+            CUDA_CHECK(cudaMemcpyAsync(dst.data_, src_ptr, dst.nbytes_, cudaMemcpyHostToDevice, stream.s));
+        } else {
+            throw std::invalid_argument("ktorch.copy_from_torch_float: unsupported source torch device.");
+        }
+        stream.synchronize();
+    } else {
+        if (src_device_type == "cpu") {
+            std::memcpy(dst.data_, src_ptr, dst.nbytes_);
+        } else if (src_device_type == "cuda") {
+            Stream stream = py_current_stream();
+            CUDA_CHECK(cudaMemcpyAsync(dst.data_, src_ptr, dst.nbytes_, cudaMemcpyDeviceToHost, stream.s));
+            stream.synchronize();
+        } else {
+            throw std::invalid_argument("ktorch.copy_from_torch_float: unsupported source torch device.");
+        }
+    }
+}
+
+inline void tensor_copy_from_torch_int32(Tensor& dst, const py::object& obj) {
+    if (dst.dtype_ != DType::I32) {
+        throw std::invalid_argument("ktorch: copy_from_torch_int32 only supports I32 tensors.");
+    }
+    py::object t = ensure_torch_tensor(obj, "ktorch.copy_from_torch_int32");
+    if (!t.attr("is_contiguous")().cast<bool>()) {
+        throw std::invalid_argument("ktorch.copy_from_torch_int32: input tensor must be contiguous.");
+    }
+    if (t.attr("numel")().cast<size_t>() != dst.numel_) {
+        throw std::invalid_argument("ktorch.copy_from_torch_int32: input element count must match tensor.numel().");
+    }
+    const std::string src_device_type = py::str(t.attr("device").attr("type"));
+    const void* src_ptr = reinterpret_cast<const void*>(t.attr("data_ptr")().cast<uintptr_t>());
+
+    if (dst.device_ == Device::CUDA) {
+        Stream stream = py_current_stream();
+        if (src_device_type == "cuda") {
+            CUDA_CHECK(cudaMemcpyAsync(dst.data_, src_ptr, dst.nbytes_, cudaMemcpyDeviceToDevice, stream.s));
+        } else if (src_device_type == "cpu") {
+            CUDA_CHECK(cudaMemcpyAsync(dst.data_, src_ptr, dst.nbytes_, cudaMemcpyHostToDevice, stream.s));
+        } else {
+            throw std::invalid_argument("ktorch.copy_from_torch_int32: unsupported source torch device.");
+        }
+        stream.synchronize();
+    } else {
+        if (src_device_type == "cpu") {
+            std::memcpy(dst.data_, src_ptr, dst.nbytes_);
+        } else if (src_device_type == "cuda") {
+            Stream stream = py_current_stream();
+            CUDA_CHECK(cudaMemcpyAsync(dst.data_, src_ptr, dst.nbytes_, cudaMemcpyDeviceToHost, stream.s));
+            stream.synchronize();
+        } else {
+            throw std::invalid_argument("ktorch.copy_from_torch_int32: unsupported source torch device.");
+        }
+    }
+}
+
 inline py::array_t<float> tensor_to_numpy_float(const Tensor& src) {
     if (src.dtype_ != DType::F32) {
         throw std::invalid_argument("ktorch: to_numpy_float only supports F32 tensors.");

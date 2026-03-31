@@ -81,6 +81,32 @@ def from_numpy(array: Any, device=Device.CUDA):
     raise ValueError("ktorch.from_numpy supports only float32 and int32 arrays.")
 
 
+def from_torch(tensor: Any, device=Device.CUDA):
+    try:
+        import torch
+    except Exception as e:
+        raise RuntimeError("ktorch.from_torch requires torch.") from e
+
+    if not isinstance(tensor, torch.Tensor):
+        raise TypeError("ktorch.from_torch: input must be a torch.Tensor.")
+
+    t = tensor.contiguous()
+    if t.dtype == torch.float32:
+        out = Tensor(list(t.shape), dtype=DType.F32, device=device)
+        out.copy_from_torch_float(t)
+        return out
+    if t.dtype == torch.int32:
+        out = Tensor(list(t.shape), dtype=DType.I32, device=device)
+        out.copy_from_torch_int32(t)
+        return out
+    if t.dtype == torch.int64:
+        t_i32 = t.to(dtype=torch.int32).contiguous()
+        out = Tensor(list(t_i32.shape), dtype=DType.I32, device=device)
+        out.copy_from_torch_int32(t_i32)
+        return out
+    raise ValueError("ktorch.from_torch supports only torch.float32, torch.int32, and torch.int64.")
+
+
 def to_numpy(tensor: Tensor):
     try:
         import numpy as np

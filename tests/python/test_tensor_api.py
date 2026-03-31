@@ -88,6 +88,21 @@ class TensorApiTest(unittest.TestCase):
         self.assertEqual(tuple(out.shape), (2, 2))
         assert_allclose(out.reshape(-1).tolist(), arr.reshape(-1).tolist())
 
+    def test_from_torch_helper_cpu(self):
+        try:
+            import torch
+        except Exception:
+            self.skipTest("torch unavailable")
+
+        x = torch.tensor([[1.0, -2.0], [3.5, 4.25]], dtype=torch.float32)
+        y = torch.tensor([7, -3], dtype=torch.int64)
+
+        tx = ktorch.from_torch(x, device=ktorch.Device.CPU)
+        ty = ktorch.from_torch(y, device=ktorch.Device.CPU)
+
+        assert_allclose(tx.to_numpy_float().reshape(-1).tolist(), [1.0, -2.0, 3.5, 4.25])
+        self.assertEqual(ty.to_numpy_int32().tolist(), [7, -3])
+
     def test_item_float_and_int32(self):
         tf = ktorch.Tensor([1], dtype=ktorch.DType.F32, device=ktorch.Device.CPU)
         tf.copy_from_list_float([3.25])
