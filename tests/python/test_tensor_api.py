@@ -33,20 +33,28 @@ class TensorApiTest(unittest.TestCase):
         c = t.clone(ktorch.Device.CPU)
         assert_allclose(c.to_list_float(), [1.0, -2.0, 3.0, -4.0])
 
-    def test_from_torch_helper_cpu(self):
+    def test_from_torch_borrow_and_copy_to_cpu(self):
         try:
             import torch
         except Exception:
             self.skipTest("torch unavailable")
 
-        x = torch.tensor([[1.0, -2.0], [3.5, 4.25]], dtype=torch.float32)
-        y = torch.tensor([7, -3], dtype=torch.int64)
+        x = torch.tensor([[1.0, -2.0], [3.5, 4.25]], dtype=torch.float32).pin_memory()
+        y = torch.tensor([7, -3], dtype=torch.int32).pin_memory()
 
-        tx = ktorch.from_torch(x, device=ktorch.Device.CPU)
-        ty = ktorch.from_torch(y, device=ktorch.Device.CPU)
+        bx = ktorch.from_torch_borrow_cpu(x)
+        by = ktorch.from_torch_borrow_cpu(y)
 
-        assert_allclose(tx.to_list_float(), [1.0, -2.0, 3.5, 4.25])
-        self.assertEqual(ty.to_list_int32(), [7, -3])
+        tx = ktorch.empty([2, 2], dtype=ktorch.DType.F32, device=ktorch.Device.CUDA)
+        ty = ktorch.empty([2], dtype=ktorch.DType.I32, device=ktorch.Device.CUDA)
+        s = ktorch.current_stream()
+        tx.copy_from(bx, s, True)
+        ty.copy_from(by, s, True)
+
+        tx_cpu = tx.clone(ktorch.Device.CPU)
+        ty_cpu = ty.clone(ktorch.Device.CPU)
+        assert_allclose(tx_cpu.to_list_float(), [1.0, -2.0, 3.5, 4.25])
+        self.assertEqual(ty_cpu.to_list_int32(), [7, -3])
 
     def test_from_torch_borrow_cpu_pinned_default(self):
         try:
