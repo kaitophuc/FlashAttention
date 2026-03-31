@@ -71,5 +71,5 @@ This runs `tests/run_python_tests.sh`.
 
 - Set `FA_REQUIRE_CUDA_TESTS=1` to fail if selected tests are skipped.
 - Labels:
-  - `smoke`: fast correctness/invariant-oriented patterns.
-  - `stress`: long reuse/order stress patterns.
+  - `smoke`: fast correctness/invariant-oriented patterns (including `MultiStream.*`).
+  - `stress`: long reuse/order stress patterns (including `MultiStreamStress.*`).

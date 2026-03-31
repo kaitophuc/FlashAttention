@@ -115,10 +115,10 @@ if [[ -n "$label" && "$label" != "all" && -n "$target" ]]; then
 
     case "$label" in
       smoke)
-      bin_args+=("--gtest_filter=LinearForward.Rejects*:LinearForward.SweepAllCases:LinearForward.Numeric*:LinearForward.Invariant*:LinearBackward.MatchesReference*:LinearBackward.SweepAllCases:LinearBackward.NeedsDb*:LinearBackward.Rejects*:LinearBackward.FiniteDifference*:LinearBackward.NeedsGradFlags*:LinearForwardBackward.*:SoftmaxForward.Rejects*:SoftmaxForward.MatchesReference*:SoftmaxForward.SweepAllCases:SoftmaxForward.Numeric*:SoftmaxForward.Invariant*:SoftmaxBackward.Rejects*:SoftmaxBackward.MatchesReference*:SoftmaxBackward.SweepAllCases:SoftmaxBackward.FiniteDifference*:SoftmaxBackward.Invariant*:SoftmaxForwardBackward.*:TensorCorrectness.*")
+      bin_args+=("--gtest_filter=LinearForward.Rejects*:LinearForward.SweepAllCases:LinearForward.Numeric*:LinearForward.Invariant*:LinearBackward.MatchesReference*:LinearBackward.SweepAllCases:LinearBackward.NeedsDb*:LinearBackward.Rejects*:LinearBackward.FiniteDifference*:LinearBackward.NeedsGradFlags*:LinearForwardBackward.*:SoftmaxForward.Rejects*:SoftmaxForward.MatchesReference*:SoftmaxForward.SweepAllCases:SoftmaxForward.Numeric*:SoftmaxForward.Invariant*:SoftmaxBackward.Rejects*:SoftmaxBackward.MatchesReference*:SoftmaxBackward.SweepAllCases:SoftmaxBackward.FiniteDifference*:SoftmaxBackward.Invariant*:SoftmaxForwardBackward.*:TensorCorrectness.*:MultiStream.*")
       ;;
       stress)
-      bin_args+=("--gtest_filter=LinearForward.SingleStreamOrderingReuseStress*:LinearBackward.SingleStreamOrderingReuseStress*")
+      bin_args+=("--gtest_filter=LinearForward.SingleStreamOrderingReuseStress*:LinearBackward.SingleStreamOrderingReuseStress*:MultiStreamStress.*")
       ;;
   esac
 fi
@@ -172,10 +172,10 @@ if [[ -z "$target" ]]; then
   if [[ -n "$label" && "$label" != "all" ]]; then
     case "$label" in
       smoke)
-        ctest_cmd+=( -R "(Rejects|SweepAllCases|Numeric|Invariant|SingleStream|TensorCorrectness\\.)" )
+        ctest_cmd+=( -R "(Rejects|SweepAllCases|Numeric|Invariant|SingleStream|MultiStream|TensorCorrectness\\.)" )
         ;;
       stress)
-        ctest_cmd+=( -R "(ReuseStress)" )
+        ctest_cmd+=( -R "(ReuseStress|MultiStreamStress)" )
         ;;
     esac
   fi

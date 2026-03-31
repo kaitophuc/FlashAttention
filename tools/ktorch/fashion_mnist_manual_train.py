@@ -60,7 +60,7 @@ def next_batch(it, loader):
         return next(it), it
 
 
-def train_step(batch, w1, b1, w2, b2, in_dim: int, lr: float, compute_metrics: bool):
+def train_step(batch, w1, b1, w2, b2, in_dim: int, lr: float):
     x, labels_t = batch
     bsz = int(x.shape[0])
     x.view([bsz, in_dim])
@@ -81,11 +81,9 @@ def train_step(batch, w1, b1, w2, b2, in_dim: int, lr: float, compute_metrics: b
     ops.sgd_update_(w1, g1.dW, lr)
     ops.sgd_update_(b1, g1.db, lr)
 
-    correct_t: Optional[ktorch.Tensor] = None
-    if compute_metrics:
-        correct_t = ops.classification_correct_count(z2, labels_t)
+    correct_t = ops.classification_correct_count(z2, labels_t)
 
-    return loss_t, correct_t, bsz
+    return loss_t, correct_t
 
 
 def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, max_batches: int) -> Tuple[float, float]:
@@ -194,7 +192,7 @@ def main() -> None:
             if args.max_train_batches > 0 and batch_idx >= args.max_train_batches:
                 break
 
-            loss_t, correct_t, _ = train_step(
+            loss_t, correct_t = train_step(
                 batch,
                 w1,
                 b1,
@@ -202,7 +200,6 @@ def main() -> None:
                 b2,
                 in_dim,
                 args.lr,
-                compute_metrics=True,
             )
             if correct_t is None:
                 raise RuntimeError("internal error: compute_metrics=True must return correct_t tensor")
