@@ -41,6 +41,12 @@ void bind_tensor(py::module_& m) {
              "Fast path: copy from contiguous torch float32 tensor.")
         .def("copy_from_torch_int32", &tensor_copy_from_torch_int32, py::arg("values"),
              "Fast path: copy from contiguous torch int32 tensor.")
+        .def("copy_from",
+             &tensor_copy_from_tensor,
+             py::arg("src"),
+             py::arg("stream"),
+             py::arg("strict_immutability") = true,
+             "General tensor copy submitted to the provided stream.")
         .def("to_numpy_float", &tensor_to_numpy_float,
              "Fast path: copy tensor data into a NumPy float32 array.")
         .def("to_numpy_int32", &tensor_to_numpy_int32,
@@ -95,10 +101,4 @@ void bind_tensor(py::module_& m) {
           py::arg("tensor"),
           py::arg("require_contiguous") = true,
           py::arg("require_pinned") = true);
-    m.def("copy_cpu_to_cuda_async",
-          &tensor_copy_cpu_to_cuda_async,
-          py::arg("src_cpu"),
-          py::arg("dst_cuda"),
-          py::arg("stream"),
-          py::arg("strict_immutability") = true);
 }

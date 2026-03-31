@@ -425,7 +425,6 @@ struct Tensor {
             throw std::invalid_argument("tensor.h: Unsupported device combination for copying.");
         }
         CUDA_CHECK(cudaMemcpyAsync(data_, src.data_, nbytes_, kind, stream.s));
-        stream.synchronize();
     }
 
     template <typename T>
@@ -442,7 +441,6 @@ struct Tensor {
             throw std::invalid_argument("tensor.h: Stream argument is only valid for CUDA tensors.");
         }
         CUDA_CHECK(cudaMemcpyAsync(data_, src.data(), src.size() * sizeof(T), cudaMemcpyHostToDevice, stream.s));
-        stream.synchronize();
     }
 
     template <typename T>

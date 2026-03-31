@@ -120,10 +120,6 @@ def from_torch_borrow_cpu(tensor: Any, require_contiguous: bool = True, require_
     return _C.from_torch_borrow_cpu(tensor, require_contiguous, require_pinned)
 
 
-def copy_cpu_to_cuda_async(src_cpu: Tensor, dst_cuda: Tensor, stream: Stream, strict_immutability: bool = True) -> None:
-    _C.copy_cpu_to_cuda_async(src_cpu, dst_cuda, stream, strict_immutability)
-
-
 def to_numpy(tensor: Tensor):
     try:
         import numpy as np

@@ -42,8 +42,8 @@ Failure cases:
 - Non-pinned tensor when `require_pinned=True`.
 - Unsupported dtype.
 
-### `ktorch.copy_cpu_to_cuda_async(src_cpu, dst_cuda, stream, strict_immutability=True)`
-Submits async H2D copy on the provided `ktorch` stream.
+### `dst_cuda.copy_from(src_cpu, stream, strict_immutability=True)`
+Submits async tensor copy on the provided `ktorch` stream.
 
 Requirements:
 - `src_cpu.device == CPU`, `dst_cuda.device == CUDA`.
@@ -73,7 +73,7 @@ These APIs are used to gate compute stream execution on copy completion without 
 ### Typical timeline
 1. PyTorch DataLoader yields pinned CPU tensors.
 2. `ktorch.from_torch_borrow_cpu` borrows CPU memory.
-3. `ktorch.copy_cpu_to_cuda_async` submits copies on copy stream.
+3. `dst_gpu.copy_from(src_cpu, copy_stream, strict_immutability=True)` submits copies on copy stream.
 4. `ktorch.record_event(copy_done, copy_stream)`.
 5. `ktorch.wait_event(compute_stream, copy_done)`.
 6. Model ops run on compute stream.
@@ -98,7 +98,7 @@ High-level flow:
 - For each batch:
   - Borrow CPU tensors with `from_torch_borrow_cpu`.
   - Allocate CUDA destination tensors in `ktorch`.
-  - Submit async H2D copies on `copy_stream`.
+  - Submit async copies with `Tensor.copy_from(..., copy_stream, strict_immutability=True)`.
   - Record event on `copy_stream`.
   - Wait on `compute_stream`.
   - Run `ktorch` forward/backward/update.

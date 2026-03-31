@@ -29,6 +29,7 @@ Tensor MakeCudaTensorF32(const std::vector<int64_t>& shape,
                          Stream& stream) {
     Tensor t(shape, DType::F32, Device::CUDA, stream);
     t.copy_from(values, stream);
+    stream.synchronize();
     return t;
 }
 
@@ -37,6 +38,7 @@ Tensor MakeCudaTensorI32(const std::vector<int64_t>& shape,
                          Stream& stream) {
     Tensor t(shape, DType::I32, Device::CUDA, stream);
     t.copy_from(values, stream);
+    stream.synchronize();
     return t;
 }
 

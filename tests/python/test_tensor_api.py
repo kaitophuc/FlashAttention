@@ -132,7 +132,7 @@ class TensorApiTest(unittest.TestCase):
         with self.assertRaises(Exception):
             _ = ktorch.from_torch_borrow_cpu(x, require_pinned=False)
 
-    def test_copy_cpu_to_cuda_async_with_strict_immutability(self):
+    def test_copy_from_tensor_with_strict_immutability(self):
         if not cuda_available():
             self.skipTest("CUDA unavailable")
         try:
@@ -146,14 +146,14 @@ class TensorApiTest(unittest.TestCase):
         s = ktorch.next_stream()
 
         with ktorch.stream_guard(s):
-            ktorch.copy_cpu_to_cuda_async(src, dst, s, True)
+            dst.copy_from(src, s, True)
         ktorch.synchronize(s)
         assert_allclose(dst.to_numpy_float().reshape(-1).tolist(), [1.0, -2.0, 3.5, 4.25])
 
         src_torch.add_(1.0)
         with self.assertRaises(Exception):
             with ktorch.stream_guard(s):
-                ktorch.copy_cpu_to_cuda_async(src, dst, s, True)
+                dst.copy_from(src, s, True)
 
     def test_item_float_and_int32(self):
         tf = ktorch.Tensor([1], dtype=ktorch.DType.F32, device=ktorch.Device.CPU)

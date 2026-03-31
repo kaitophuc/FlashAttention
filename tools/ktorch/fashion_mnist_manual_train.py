@@ -94,8 +94,8 @@ def _schedule_batch_to_slot(slot, batch, copy_stream, strict_borrow_immutability
         # Keep borrowed CPU sources alive across async copy completion.
         slot["x_cpu_borrow"] = x_cpu
         slot["y_cpu_borrow"] = y_cpu
-        ktorch.copy_cpu_to_cuda_async(x_cpu, slot["x_gpu"], copy_stream, strict_borrow_immutability)
-        ktorch.copy_cpu_to_cuda_async(y_cpu, slot["y_gpu"], copy_stream, strict_borrow_immutability)
+        slot["x_gpu"].copy_from(x_cpu, copy_stream, strict_borrow_immutability)
+        slot["y_gpu"].copy_from(y_cpu, copy_stream, strict_borrow_immutability)
 
         if slot.get("ready_event") is None:
             slot["ready_event"] = ktorch.Event()

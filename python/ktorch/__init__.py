@@ -23,7 +23,6 @@ from .tensor import (
     record_event,
     wait_event,
     from_torch_borrow_cpu,
-    copy_cpu_to_cuda_async,
 )
 from . import ops
 from . import data
@@ -53,7 +52,6 @@ __all__ = [
     "record_event",
     "wait_event",
     "from_torch_borrow_cpu",
-    "copy_cpu_to_cuda_async",
     "ops",
     "data",
 ]

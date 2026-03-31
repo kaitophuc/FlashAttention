@@ -352,37 +352,25 @@ inline std::shared_ptr<Tensor> tensor_from_torch_borrow_cpu(const py::object& ob
         std::move(owner)));
 }
 
-inline void tensor_copy_cpu_to_cuda_async(const Tensor& src_cpu,
-                                          Tensor& dst_cuda,
-                                          const Stream& stream,
-                                          bool strict_immutability = true) {
-    assert_non_default_stream(stream.s, "ktorch.copy_cpu_to_cuda_async");
-    if (src_cpu.device_ != Device::CPU) {
-        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: src must be a CPU tensor.");
+inline void tensor_copy_from_tensor(Tensor& dst,
+                                    const Tensor& src,
+                                    Stream stream,
+                                    bool strict_immutability = true) {
+    assert_non_default_stream(stream.s, "ktorch.Tensor.copy_from");
+    if (!src.is_contiguous() || !dst.is_contiguous()) {
+        throw std::invalid_argument("ktorch.Tensor.copy_from: src and dst must be contiguous.");
     }
-    if (dst_cuda.device_ != Device::CUDA) {
-        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: dst must be a CUDA tensor.");
-    }
-    if (src_cpu.shape_ != dst_cuda.shape_) {
-        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: src and dst shape mismatch.");
-    }
-    if (src_cpu.dtype_ != dst_cuda.dtype_) {
-        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: src and dst dtype mismatch.");
-    }
-    if (!src_cpu.is_contiguous() || !dst_cuda.is_contiguous()) {
-        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: src and dst must be contiguous.");
-    }
-    if (strict_immutability && src_cpu.borrow_source_ == Tensor::BorrowSource::Torch) {
-        if (!tensor_validate_torch_borrow_version(src_cpu)) {
-            throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: borrowed torch tensor was mutated before copy.");
+    if (strict_immutability && src.borrow_source_ == Tensor::BorrowSource::Torch) {
+        if (!tensor_validate_torch_borrow_version(src)) {
+            throw std::invalid_argument("ktorch.Tensor.copy_from: borrowed torch tensor was mutated before copy.");
         }
     }
 
-    CUDA_CHECK(cudaMemcpyAsync(dst_cuda.data_, src_cpu.data_, src_cpu.nbytes_, cudaMemcpyHostToDevice, stream.s));
+    dst.copy_from(src, stream);
 
-    if (strict_immutability && src_cpu.borrow_source_ == Tensor::BorrowSource::Torch) {
-        if (!tensor_validate_torch_borrow_version(src_cpu)) {
-            throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: borrowed torch tensor was mutated during copy submission.");
+    if (strict_immutability && src.borrow_source_ == Tensor::BorrowSource::Torch) {
+        if (!tensor_validate_torch_borrow_version(src)) {
+            throw std::invalid_argument("ktorch.Tensor.copy_from: borrowed torch tensor was mutated during copy submission.");
         }
     }
 }
