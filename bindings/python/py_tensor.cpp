@@ -33,10 +33,8 @@ void bind_tensor(py::module_& m) {
              "Compatibility/slow path: copy from Python int list.")
         .def("to_list_float", &tensor_to_list_float,
              "Compatibility/slow path: convert tensor data to Python float list.")
-        .def("copy_from_buffer_float", &tensor_copy_from_buffer_float, py::arg("values"),
-             "Fast path: copy from contiguous host float32 buffer-like object.")
-        .def("copy_from_buffer_int32", &tensor_copy_from_buffer_int32, py::arg("values"),
-             "Fast path: copy from contiguous host int32 buffer-like object.")
+        .def("to_list_int32", &tensor_to_list_int32,
+             "Compatibility/slow path: convert tensor data to Python int32 list.")
         .def("copy_from_torch_float", &tensor_copy_from_torch_float, py::arg("values"),
              "Fast path: copy from contiguous torch float32 tensor.")
         .def("copy_from_torch_int32", &tensor_copy_from_torch_int32, py::arg("values"),
@@ -47,10 +45,6 @@ void bind_tensor(py::module_& m) {
              py::arg("stream"),
              py::arg("strict_immutability") = true,
              "General tensor copy submitted to the provided stream.")
-        .def("to_numpy_float", &tensor_to_numpy_float,
-             "Fast path: copy tensor data into a NumPy float32 array.")
-        .def("to_numpy_int32", &tensor_to_numpy_int32,
-             "Fast path: copy tensor data into a NumPy int32 array.")
         .def("item_float", &tensor_item_float,
              "Read a scalar float32 tensor value to host.")
         .def("item_int32", &tensor_item_int32,

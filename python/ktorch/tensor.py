@@ -69,27 +69,6 @@ def wait_event(stream: Stream, event: Event) -> None:
     _C.wait_event(stream, event)
 
 
-def from_numpy(array: Any, device=Device.CUDA):
-    try:
-        import numpy as np
-    except Exception as e:
-        raise RuntimeError("ktorch.from_numpy requires numpy.") from e
-
-    arr = np.asarray(array)
-    if not arr.flags.c_contiguous:
-        raise ValueError("ktorch.from_numpy: input array must be C-contiguous.")
-
-    if arr.dtype == np.float32:
-        t = Tensor(list(arr.shape), dtype=DType.F32, device=device)
-        t.copy_from_buffer_float(arr)
-        return t
-    if arr.dtype == np.int32:
-        t = Tensor(list(arr.shape), dtype=DType.I32, device=device)
-        t.copy_from_buffer_int32(arr)
-        return t
-    raise ValueError("ktorch.from_numpy supports only float32 and int32 arrays.")
-
-
 def from_torch(tensor: Any, device=Device.CUDA):
     try:
         import torch
@@ -118,16 +97,3 @@ def from_torch(tensor: Any, device=Device.CUDA):
 
 def from_torch_borrow_cpu(tensor: Any, require_contiguous: bool = True, require_pinned: bool = True):
     return _C.from_torch_borrow_cpu(tensor, require_contiguous, require_pinned)
-
-
-def to_numpy(tensor: Tensor):
-    try:
-        import numpy as np
-    except Exception as e:
-        raise RuntimeError("ktorch.to_numpy requires numpy.") from e
-
-    if tensor.dtype == DType.F32:
-        return tensor.to_numpy_float()
-    if tensor.dtype == DType.I32:
-        return tensor.to_numpy_int32()
-    raise ValueError("ktorch.to_numpy supports only F32 and I32 tensors.")
