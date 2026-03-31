@@ -81,11 +81,19 @@ def _schedule_batch_to_slot(slot, batch, copy_stream, strict_borrow_immutability
     y_cpu = ktorch.from_torch_borrow_cpu(labels, require_contiguous=True, require_pinned=True)
 
     with ktorch.stream_guard(copy_stream):
+        # If this slot was used by prior compute, do not overwrite its GPU buffers
+        # until that compute stream work is fully complete.
+        if slot.get("compute_done_recorded", False):
+            ktorch.wait_event(copy_stream, slot["compute_done_event"])
+
         if not _slot_tensor_matches(slot.get("x_gpu"), x_cpu.shape, x_cpu.dtype):
             slot["x_gpu"] = ktorch.empty(list(x_cpu.shape), dtype=x_cpu.dtype, device=ktorch.Device.CUDA)
         if not _slot_tensor_matches(slot.get("y_gpu"), y_cpu.shape, y_cpu.dtype):
             slot["y_gpu"] = ktorch.empty(list(y_cpu.shape), dtype=y_cpu.dtype, device=ktorch.Device.CUDA)
 
+        # Keep borrowed CPU sources alive across async copy completion.
+        slot["x_cpu_borrow"] = x_cpu
+        slot["y_cpu_borrow"] = y_cpu
         ktorch.copy_cpu_to_cuda_async(x_cpu, slot["x_gpu"], copy_stream, strict_borrow_immutability)
         ktorch.copy_cpu_to_cuda_async(y_cpu, slot["y_gpu"], copy_stream, strict_borrow_immutability)
 
@@ -195,7 +203,7 @@ def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: in
     measured: List[float] = []
     copy_stream = ktorch.next_stream()
     compute_stream = ktorch.current_stream()
-    slots = [{}, {}]
+    slots = [{}, {}, {}]
     cur = 0
 
     total_steps = args.benchmark_warmup + args.benchmark_steps
@@ -204,12 +212,18 @@ def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: in
 
     for step in range(total_steps):
         next_batch_data, loader_it = next_batch(loader_it, train_loader)
-        nxt = 1 - cur
+        nxt = (cur + 1) % len(slots)
         _schedule_batch_to_slot(slots[nxt], next_batch_data, copy_stream, args.strict_borrow_immutability)
 
         ktorch.wait_event(compute_stream, slots[cur]["ready_event"])
         t0 = time.perf_counter()
         train_step((slots[cur]["x_gpu"], slots[cur]["y_gpu"]), w1, b1, w2, b2, in_dim, args.lr)
+        if slots[cur].get("compute_done_event") is None:
+            slots[cur]["compute_done_event"] = ktorch.Event()
+        ktorch.record_event(slots[cur]["compute_done_event"], compute_stream)
+        slots[cur]["compute_done_recorded"] = True
+        slots[cur]["x_cpu_borrow"] = None
+        slots[cur]["y_cpu_borrow"] = None
         dt = time.perf_counter() - t0
         if step >= args.benchmark_warmup:
             measured.append(dt)
@@ -268,7 +282,7 @@ def main() -> None:
     train_start = time.perf_counter()
 
     for epoch in range(args.epochs):
-        slots = [{}, {}]
+        slots = [{}, {}, {}]
         cur = 0
         batch_iter = iter(_iter_limited_batches(train_loader, args.max_train_batches))
 
@@ -279,7 +293,7 @@ def main() -> None:
         _schedule_batch_to_slot(slots[cur], first_batch, copy_stream, args.strict_borrow_immutability)
 
         while True:
-            nxt = 1 - cur
+            nxt = (cur + 1) % len(slots)
             next_batch_data = next(batch_iter, None)
             has_next = next_batch_data is not None
             if has_next:
@@ -299,6 +313,12 @@ def main() -> None:
             if correct_t is None:
                 raise RuntimeError("internal error: compute_metrics=True must return correct_t tensor")
             _ = loss_t
+            if slots[cur].get("compute_done_event") is None:
+                slots[cur]["compute_done_event"] = ktorch.Event()
+            ktorch.record_event(slots[cur]["compute_done_event"], compute_stream)
+            slots[cur]["compute_done_recorded"] = True
+            slots[cur]["x_cpu_borrow"] = None
+            slots[cur]["y_cpu_borrow"] = None
             if not has_next:
                 break
             cur = nxt
