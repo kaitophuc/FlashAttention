@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -18,6 +19,16 @@
 #include "cublass_handle.h"
 
 struct Tensor {
+    enum class StorageMode : uint8_t {
+        Owned = 0,
+        BorrowedExternal = 1,
+    };
+
+    enum class BorrowSource : uint8_t {
+        None = 0,
+        Torch = 1,
+    };
+
     void* data_;
     std::vector<int64_t> shape_;
     std::vector<int64_t> strides_;  // Element strides (PyTorch style).
@@ -25,6 +36,11 @@ struct Tensor {
     Device device_;
     size_t numel_;
     size_t nbytes_;
+    StorageMode storage_mode_{StorageMode::Owned};
+    bool read_only_{false};
+    BorrowSource borrow_source_{BorrowSource::None};
+    uint64_t borrow_version_{0};
+    std::shared_ptr<void> external_owner_;
 
     void checkValid(const std::vector<int64_t>& shape, DType dtype, Device device) const {
         if (shape.empty()) {
@@ -110,9 +126,18 @@ struct Tensor {
           dtype_(other.dtype_),
           device_(other.device_),
           numel_(other.numel_),
-          nbytes_(other.nbytes_) {
+          nbytes_(other.nbytes_),
+          storage_mode_(other.storage_mode_),
+          read_only_(other.read_only_),
+          borrow_source_(other.borrow_source_),
+          borrow_version_(other.borrow_version_),
+          external_owner_(std::move(other.external_owner_)) {
         other.numel_ = 0;
         other.nbytes_ = 0;
+        other.storage_mode_ = StorageMode::Owned;
+        other.read_only_ = false;
+        other.borrow_source_ = BorrowSource::None;
+        other.borrow_version_ = 0;
     }
 
     Tensor& operator=(Tensor&& other) noexcept {
@@ -125,8 +150,17 @@ struct Tensor {
             device_ = other.device_;
             numel_ = other.numel_;
             nbytes_ = other.nbytes_;
+            storage_mode_ = other.storage_mode_;
+            read_only_ = other.read_only_;
+            borrow_source_ = other.borrow_source_;
+            borrow_version_ = other.borrow_version_;
+            external_owner_ = std::move(other.external_owner_);
             other.numel_ = 0;
             other.nbytes_ = 0;
+            other.storage_mode_ = StorageMode::Owned;
+            other.read_only_ = false;
+            other.borrow_source_ = BorrowSource::None;
+            other.borrow_version_ = 0;
         }
         return *this;
     }
@@ -177,6 +211,52 @@ struct Tensor {
                                  uint64_t seed,
                                  DType dtype,
                                  Device device);
+
+    static Tensor borrowed_external(void* external_data,
+                                    std::vector<int64_t> shape,
+                                    std::vector<int64_t> strides,
+                                    DType dtype,
+                                    Device device,
+                                    bool read_only,
+                                    BorrowSource borrow_source = BorrowSource::None,
+                                    uint64_t borrow_version = 0,
+                                    std::shared_ptr<void> external_owner = nullptr) {
+        if (external_data == nullptr) {
+            throw std::invalid_argument("tensor.h: borrowed_external requires non-null external_data.");
+        }
+        Tensor out;
+        out.checkValid(shape, dtype, device);
+        out.dtype_ = dtype;
+        out.device_ = device;
+        out.shape_ = std::move(shape);
+        out.numel_ = 1;
+        for (int64_t dim : out.shape_) {
+            out.numel_ *= static_cast<size_t>(dim);
+        }
+        out.nbytes_ = out.numel_ * dtype_size(out.dtype_);
+
+        if (strides.empty()) {
+            out.strides_.resize(out.shape_.size());
+            size_t stride = 1;
+            for (int i = static_cast<int>(out.shape_.size()) - 1; i >= 0; --i) {
+                out.strides_[i] = static_cast<int64_t>(stride);
+                stride *= static_cast<size_t>(out.shape_[i]);
+            }
+        } else {
+            if (strides.size() != out.shape_.size()) {
+                throw std::invalid_argument("tensor.h: borrowed_external strides rank mismatch.");
+            }
+            out.strides_ = std::move(strides);
+        }
+
+        out.data_ = external_data;
+        out.storage_mode_ = StorageMode::BorrowedExternal;
+        out.read_only_ = read_only;
+        out.borrow_source_ = borrow_source;
+        out.borrow_version_ = borrow_version;
+        out.external_owner_ = std::move(external_owner);
+        return out;
+    }
 
     size_t numel() const {
         return numel_;
@@ -304,6 +384,7 @@ struct Tensor {
 
 
     void zero_(Stream& stream) {
+        assert_mutable_for_write("tensor.h: zero_(stream)");
         assert_non_default_stream(stream.s, "tensor.h: zero_(stream)");
         if (device_ != Device::CUDA) {
             throw std::invalid_argument("tensor.h: Stream argument is only valid for CUDA tensors.");
@@ -312,6 +393,7 @@ struct Tensor {
     }
 
     void zero_() {
+        assert_mutable_for_write("tensor.h: zero_");
         if (device_ == Device::CUDA) {
             Stream current = current_stream();
             CUDA_CHECK(cudaMemsetAsync(data_, 0, nbytes_, current.s));
@@ -321,6 +403,7 @@ struct Tensor {
     }
 
     void copy_from(const Tensor& src, Stream& stream) {
+        assert_mutable_for_write("tensor.h: copy_from(tensor, stream)");
         assert_non_default_stream(stream.s, "tensor.h: copy_from(tensor, stream)");
         if (shape_ != src.shape_) {
             throw std::invalid_argument("tensor.h: Source and destination tensors must have the same shape.");
@@ -347,6 +430,7 @@ struct Tensor {
 
     template <typename T>
     void copy_from(const std::vector<T>& src, Stream& stream) {
+        assert_mutable_for_write("tensor.h: copy_from(vector, stream)");
         assert_non_default_stream(stream.s, "tensor.h: copy_from(vector, stream)");
         if (!check_dtype_match<T>()) {
             throw std::runtime_error("Requested dtype does not match tensor dtype.");
@@ -363,6 +447,7 @@ struct Tensor {
 
     template <typename T>
     void copy_from(const std::vector<T>& src) {
+        assert_mutable_for_write("tensor.h: copy_from(vector)");
         if (!check_dtype_match<T>()) {
             throw std::runtime_error("Requested dtype does not match tensor dtype.");
         }
@@ -380,16 +465,40 @@ struct Tensor {
     Tensor matmul(const Tensor& other) const;
     Tensor matmul(const Tensor& other, Stream& stream, CublasHandle& cublas_handle) const;
 
+    bool is_borrowed() const {
+        return storage_mode_ == StorageMode::BorrowedExternal;
+    }
+
+    bool is_read_only() const {
+        return read_only_;
+    }
+
 private:
+    Tensor()
+        : data_(nullptr),
+          dtype_(DType::F32),
+          device_(Device::CPU),
+          numel_(0),
+          nbytes_(0) {}
+
     void release() noexcept {
         if (data_ != nullptr) {
-            if (device_ == Device::CUDA) {
-                deallocate_device(data_);
-            } else {
-                deallocate_host(data_);
+            if (storage_mode_ == StorageMode::Owned) {
+                if (device_ == Device::CUDA) {
+                    deallocate_device(data_);
+                } else {
+                    deallocate_host(data_);
+                }
             }
         }
         data_ = nullptr;
+        external_owner_.reset();
+    }
+
+    void assert_mutable_for_write(const char* where) const {
+        if (read_only_) {
+            throw std::invalid_argument(std::string(where) + ": tensor is read-only.");
+        }
     }
 
     template <typename T>

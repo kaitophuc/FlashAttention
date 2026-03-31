@@ -25,6 +25,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--benchmark-warmup", type=int, default=20, help="Warmup steps for benchmark mode.")
     p.add_argument("--benchmark-steps", type=int, default=100, help="Measured steps for benchmark mode.")
+    p.add_argument(
+        "--strict-borrow-immutability",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Validate borrowed torch tensors were not mutated while owned by ktorch copy boundary.",
+    )
     return p.parse_args()
 
 
@@ -58,11 +64,34 @@ def next_batch(it, loader):
         return next(it), it
 
 
-def torch_batch_to_ktorch(batch, use_cuda: bool, torch):
+def _iter_limited_batches(loader, max_batches: int):
+    for idx, batch in enumerate(loader):
+        if max_batches > 0 and idx >= max_batches:
+            break
+        yield batch
+
+
+def _slot_tensor_matches(t, shape, dtype) -> bool:
+    return t is not None and list(t.shape) == list(shape) and t.dtype == dtype
+
+
+def _schedule_batch_to_slot(slot, batch, copy_stream, strict_borrow_immutability: bool):
     images, labels = batch
-    x = ktorch.from_torch(images, device=ktorch.Device.CUDA)
-    y = ktorch.from_torch(labels, device=ktorch.Device.CUDA)
-    return x, y
+    x_cpu = ktorch.from_torch_borrow_cpu(images, require_contiguous=True, require_pinned=True)
+    y_cpu = ktorch.from_torch_borrow_cpu(labels, require_contiguous=True, require_pinned=True)
+
+    with ktorch.stream_guard(copy_stream):
+        if not _slot_tensor_matches(slot.get("x_gpu"), x_cpu.shape, x_cpu.dtype):
+            slot["x_gpu"] = ktorch.empty(list(x_cpu.shape), dtype=x_cpu.dtype, device=ktorch.Device.CUDA)
+        if not _slot_tensor_matches(slot.get("y_gpu"), y_cpu.shape, y_cpu.dtype):
+            slot["y_gpu"] = ktorch.empty(list(y_cpu.shape), dtype=y_cpu.dtype, device=ktorch.Device.CUDA)
+
+        ktorch.copy_cpu_to_cuda_async(x_cpu, slot["x_gpu"], copy_stream, strict_borrow_immutability)
+        ktorch.copy_cpu_to_cuda_async(y_cpu, slot["y_gpu"], copy_stream, strict_borrow_immutability)
+
+        if slot.get("ready_event") is None:
+            slot["ready_event"] = ktorch.Event()
+        ktorch.record_event(slot["ready_event"], copy_stream)
 
 
 def train_step(batch, w1, b1, w2, b2, in_dim: int, lr: float):
@@ -91,7 +120,18 @@ def train_step(batch, w1, b1, w2, b2, in_dim: int, lr: float):
     return loss_t, correct_t
 
 
-def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, max_batches: int, use_cuda: bool, torch) -> Tuple[float, float]:
+def evaluate(
+    test_loader,
+    w1,
+    b1,
+    w2,
+    b2,
+    in_dim: int,
+    max_batches: int,
+    copy_stream,
+    compute_stream,
+    strict_borrow_immutability: bool,
+) -> Tuple[float, float]:
     total_loss = 0.0
     total_correct = 0
     total_seen = 0
@@ -100,7 +140,11 @@ def evaluate(test_loader, w1, b1, w2, b2, in_dim: int, max_batches: int, use_cud
         if max_batches > 0 and batch_idx >= max_batches:
             break
 
-        x, labels_t = torch_batch_to_ktorch(batch, use_cuda, torch)
+        slot = {}
+        _schedule_batch_to_slot(slot, batch, copy_stream, strict_borrow_immutability)
+        ktorch.wait_event(compute_stream, slot["ready_event"])
+        x = slot["x_gpu"]
+        labels_t = slot["y_gpu"]
         bsz = int(x.shape[0])
         x.view([bsz, in_dim])
 
@@ -126,6 +170,12 @@ def make_torch_loader(dataset, batch_size: int, shuffle: bool, seed: int, use_cu
     generator = torch.Generator()
     generator.manual_seed(seed)
     num_workers = 4 if use_cuda else 0
+    def collate_fn(samples):
+        images, labels = zip(*samples)
+        images_t = torch.stack(images, dim=0)
+        labels_t = torch.as_tensor(labels, dtype=torch.int32)
+        return images_t, labels_t
+
     return torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
@@ -135,6 +185,7 @@ def make_torch_loader(dataset, batch_size: int, shuffle: bool, seed: int, use_cu
         pin_memory=use_cuda,
         persistent_workers=(num_workers > 0),
         generator=generator,
+        collate_fn=collate_fn,
     )
 
 
@@ -142,16 +193,27 @@ def run_step_benchmark(train_loader, args, in_dim: int, hidden: int, out_dim: in
     w1, b1, w2, b2 = init_model_params(args.seed, in_dim, hidden, out_dim)
     loader_it = iter(train_loader)
     measured: List[float] = []
+    copy_stream = ktorch.next_stream()
+    compute_stream = ktorch.current_stream()
+    slots = [{}, {}]
+    cur = 0
 
     total_steps = args.benchmark_warmup + args.benchmark_steps
+    first_batch, loader_it = next_batch(loader_it, train_loader)
+    _schedule_batch_to_slot(slots[cur], first_batch, copy_stream, args.strict_borrow_immutability)
+
     for step in range(total_steps):
-        batch, loader_it = next_batch(loader_it, train_loader)
-        kt_batch = torch_batch_to_ktorch(batch, use_cuda, torch)
+        next_batch_data, loader_it = next_batch(loader_it, train_loader)
+        nxt = 1 - cur
+        _schedule_batch_to_slot(slots[nxt], next_batch_data, copy_stream, args.strict_borrow_immutability)
+
+        ktorch.wait_event(compute_stream, slots[cur]["ready_event"])
         t0 = time.perf_counter()
-        train_step(kt_batch, w1, b1, w2, b2, in_dim, args.lr)
+        train_step((slots[cur]["x_gpu"], slots[cur]["y_gpu"]), w1, b1, w2, b2, in_dim, args.lr)
         dt = time.perf_counter() - t0
         if step >= args.benchmark_warmup:
             measured.append(dt)
+        cur = nxt
 
     return statistics.median(measured)
 
@@ -200,17 +262,33 @@ def main() -> None:
     test_loader = make_torch_loader(test_ds, batch_size=args.batch_size, shuffle=False, seed=args.seed, use_cuda=use_cuda, torch=torch)
 
     w1, b1, w2, b2 = init_model_params(args.seed, in_dim, hidden, out_dim)
+    copy_stream = ktorch.next_stream()
+    compute_stream = ktorch.current_stream()
 
     train_start = time.perf_counter()
 
     for epoch in range(args.epochs):
-        for batch_idx, batch in enumerate(train_loader):
-            if args.max_train_batches > 0 and batch_idx >= args.max_train_batches:
-                break
-            kt_batch = torch_batch_to_ktorch(batch, use_cuda, torch)
+        slots = [{}, {}]
+        cur = 0
+        batch_iter = iter(_iter_limited_batches(train_loader, args.max_train_batches))
+
+        first_batch = next(batch_iter, None)
+        if first_batch is None:
+            continue
+        # Pipeline warmup: prefetch the first batch before timing hot steps.
+        _schedule_batch_to_slot(slots[cur], first_batch, copy_stream, args.strict_borrow_immutability)
+
+        while True:
+            nxt = 1 - cur
+            next_batch_data = next(batch_iter, None)
+            has_next = next_batch_data is not None
+            if has_next:
+                _schedule_batch_to_slot(slots[nxt], next_batch_data, copy_stream, args.strict_borrow_immutability)
+
+            ktorch.wait_event(compute_stream, slots[cur]["ready_event"])
 
             loss_t, correct_t = train_step(
-                kt_batch,
+                (slots[cur]["x_gpu"], slots[cur]["y_gpu"]),
                 w1,
                 b1,
                 w2,
@@ -221,13 +299,27 @@ def main() -> None:
             if correct_t is None:
                 raise RuntimeError("internal error: compute_metrics=True must return correct_t tensor")
             _ = loss_t
+            if not has_next:
+                break
+            cur = nxt
 
     ktorch.synchronize()  # Ensure all GPU work is done before stopping the timer.
 
     train_end = time.perf_counter()
     print(f"Training completed in {train_end - train_start:.2f} seconds.")
 
-    test_loss, test_acc = evaluate(test_loader, w1, b1, w2, b2, in_dim, args.max_test_batches, use_cuda, torch)
+    test_loss, test_acc = evaluate(
+        test_loader,
+        w1,
+        b1,
+        w2,
+        b2,
+        in_dim,
+        args.max_test_batches,
+        copy_stream,
+        compute_stream,
+        args.strict_borrow_immutability,
+    )
     print(f"Final test loss: {test_loss:.4f}, test accuracy: {test_acc:.4f}")
 
 

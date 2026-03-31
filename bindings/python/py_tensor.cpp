@@ -10,9 +10,13 @@ void bind_tensor(py::module_& m) {
         .def_property_readonly("strides", [](const Tensor& self) { return self.strides_; })
         .def_property_readonly("dtype", [](const Tensor& self) { return self.dtype_; })
         .def_property_readonly("device", [](const Tensor& self) { return self.device_; })
+        .def_property_readonly("is_borrowed", [](const Tensor& self) { return self.is_borrowed(); })
+        .def_property_readonly("is_read_only", [](const Tensor& self) { return self.is_read_only(); })
         .def("numel", &Tensor::numel)
         .def("nbytes", &Tensor::nbytes)
         .def("is_contiguous", &Tensor::is_contiguous)
+        .def("validate_torch_borrow_version", &tensor_validate_torch_borrow_version,
+             "Return True when borrowed torch tensor version is unchanged.")
         .def("view", &Tensor::view, py::arg("new_shape"))
         .def("clone", [](const Tensor& self, Device device) { return tensor_clone(self, device); }, py::arg("device"))
         .def("zero_", [](Tensor& self) {
@@ -86,4 +90,15 @@ void bind_tensor(py::module_& m) {
           py::arg("shape"),
           py::arg("values"),
           py::arg("device") = Device::CUDA);
+    m.def("from_torch_borrow_cpu",
+          &tensor_from_torch_borrow_cpu,
+          py::arg("tensor"),
+          py::arg("require_contiguous") = true,
+          py::arg("require_pinned") = true);
+    m.def("copy_cpu_to_cuda_async",
+          &tensor_copy_cpu_to_cuda_async,
+          py::arg("src_cpu"),
+          py::arg("dst_cuda"),
+          py::arg("stream"),
+          py::arg("strict_immutability") = true);
 }

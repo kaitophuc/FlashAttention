@@ -14,6 +14,26 @@ from common import cuda_available, assert_allclose
 
 
 class StreamApiTest(unittest.TestCase):
+    def test_event_record_and_wait(self):
+        if not cuda_available():
+            self.skipTest("CUDA unavailable")
+
+        copy_s = ktorch.stream_from_pool(0)
+        compute_s = ktorch.stream_from_pool(1)
+        ev = ktorch.Event()
+
+        with ktorch.stream_guard(copy_s):
+            x = ktorch.Tensor([2, 2], dtype=ktorch.DType.F32, device=ktorch.Device.CUDA)
+            x.copy_from_list_float([1.0, 2.0, 3.0, 4.0])
+            ktorch.record_event(ev, copy_s)
+
+        with ktorch.stream_guard(compute_s):
+            ktorch.wait_event(compute_s, ev)
+            y, _ = ops.relu_forward(x)
+
+        ktorch.synchronize(compute_s)
+        assert_allclose(y.to_list_float(), [1.0, 2.0, 3.0, 4.0])
+
     def test_pool_and_next_stream_basics(self):
         if not cuda_available():
             self.skipTest("CUDA unavailable")

@@ -137,6 +137,9 @@ inline std::shared_ptr<Tensor> tensor_clone(const Tensor& src, Device device) {
 }
 
 inline void tensor_copy_from_list_float(Tensor& dst, const std::vector<float>& values) {
+    if (dst.is_read_only()) {
+        throw std::invalid_argument("ktorch.copy_from_list_float: destination tensor is read-only.");
+    }
     if (dst.dtype_ != DType::F32) {
         throw std::invalid_argument("ktorch: copy_from_list_float only supports F32 tensors.");
     }
@@ -148,6 +151,9 @@ inline void tensor_copy_from_list_float(Tensor& dst, const std::vector<float>& v
 }
 
 inline void tensor_copy_from_list_int32(Tensor& dst, const std::vector<int32_t>& values) {
+    if (dst.is_read_only()) {
+        throw std::invalid_argument("ktorch.copy_from_list_int32: destination tensor is read-only.");
+    }
     if (dst.dtype_ != DType::I32) {
         throw std::invalid_argument("ktorch: copy_from_list_int32 only supports I32 tensors.");
     }
@@ -206,6 +212,9 @@ inline std::vector<py::ssize_t> shape_to_py(const std::vector<int64_t>& shape) {
 }
 
 inline void tensor_copy_from_buffer_float(Tensor& dst, const py::object& obj) {
+    if (dst.is_read_only()) {
+        throw std::invalid_argument("ktorch.copy_from_buffer_float: destination tensor is read-only.");
+    }
     if (dst.dtype_ != DType::F32) {
         throw std::invalid_argument("ktorch: copy_from_buffer_float only supports F32 tensors.");
     }
@@ -224,6 +233,9 @@ inline void tensor_copy_from_buffer_float(Tensor& dst, const py::object& obj) {
 }
 
 inline void tensor_copy_from_buffer_int32(Tensor& dst, const py::object& obj) {
+    if (dst.is_read_only()) {
+        throw std::invalid_argument("ktorch.copy_from_buffer_int32: destination tensor is read-only.");
+    }
     if (dst.dtype_ != DType::I32) {
         throw std::invalid_argument("ktorch: copy_from_buffer_int32 only supports I32 tensors.");
     }
@@ -254,7 +266,131 @@ inline py::object ensure_torch_tensor(const py::object& obj, const char* fn_name
     return obj;
 }
 
+inline uint64_t torch_tensor_version(const py::object& t, const char* fn_name) {
+    try {
+        return t.attr("_version").cast<uint64_t>();
+    } catch (const py::error_already_set&) {
+        throw std::runtime_error(std::string(fn_name) + ": unable to read torch tensor _version.");
+    }
+}
+
+inline std::shared_ptr<void> make_py_owner_token(const py::object& owner_obj) {
+    auto* p = new py::object(owner_obj);
+    return std::shared_ptr<void>(p, [](void* raw) {
+        py::gil_scoped_acquire gil;
+        delete static_cast<py::object*>(raw);
+    });
+}
+
+inline bool tensor_validate_torch_borrow_version(const Tensor& src) {
+    if (src.borrow_source_ != Tensor::BorrowSource::Torch) {
+        return true;
+    }
+    if (src.external_owner_ == nullptr) {
+        throw std::runtime_error("ktorch: borrowed torch tensor missing owner handle.");
+    }
+    auto* owner = static_cast<py::object*>(src.external_owner_.get());
+    if (owner == nullptr) {
+        throw std::runtime_error("ktorch: invalid borrowed torch owner handle.");
+    }
+    const uint64_t now = torch_tensor_version(*owner, "ktorch.tensor_validate_torch_borrow_version");
+    return now == src.borrow_version_;
+}
+
+inline std::shared_ptr<Tensor> tensor_from_torch_borrow_cpu(const py::object& obj,
+                                                            bool require_contiguous,
+                                                            bool require_pinned) {
+    py::object t = ensure_torch_tensor(obj, "ktorch.from_torch_borrow_cpu");
+    const std::string src_device_type = py::str(t.attr("device").attr("type"));
+    if (src_device_type != "cpu") {
+        throw std::invalid_argument("ktorch.from_torch_borrow_cpu: only CPU torch tensors are supported.");
+    }
+    if (require_contiguous && !t.attr("is_contiguous")().cast<bool>()) {
+        throw std::invalid_argument("ktorch.from_torch_borrow_cpu: input tensor must be contiguous.");
+    }
+    if (require_pinned && !t.attr("is_pinned")().cast<bool>()) {
+        throw std::invalid_argument("ktorch.from_torch_borrow_cpu: input tensor must be pinned (require_pinned=True).");
+    }
+
+    const py::object dtype_obj = t.attr("dtype");
+    py::module_ torch = py::module_::import("torch");
+    DType dtype;
+    if (py::bool_(dtype_obj.is(torch.attr("float32")))) {
+        dtype = DType::F32;
+    } else if (py::bool_(dtype_obj.is(torch.attr("int32")))) {
+        dtype = DType::I32;
+    } else {
+        throw std::invalid_argument("ktorch.from_torch_borrow_cpu: only torch.float32 and torch.int32 are supported.");
+    }
+
+    py::tuple shape_t = t.attr("shape");
+    std::vector<int64_t> shape;
+    shape.reserve(shape_t.size());
+    for (py::handle d : shape_t) {
+        shape.push_back(py::cast<int64_t>(d));
+    }
+
+    py::tuple stride_t = t.attr("stride")();
+    std::vector<int64_t> strides;
+    strides.reserve(stride_t.size());
+    for (py::handle d : stride_t) {
+        strides.push_back(py::cast<int64_t>(d));
+    }
+
+    void* ptr = reinterpret_cast<void*>(t.attr("data_ptr")().cast<uintptr_t>());
+    const uint64_t version = torch_tensor_version(t, "ktorch.from_torch_borrow_cpu");
+    std::shared_ptr<void> owner = make_py_owner_token(t);
+    return make_tensor_shared(Tensor::borrowed_external(
+        ptr,
+        std::move(shape),
+        std::move(strides),
+        dtype,
+        Device::CPU,
+        true,
+        Tensor::BorrowSource::Torch,
+        version,
+        std::move(owner)));
+}
+
+inline void tensor_copy_cpu_to_cuda_async(const Tensor& src_cpu,
+                                          Tensor& dst_cuda,
+                                          const Stream& stream,
+                                          bool strict_immutability = true) {
+    assert_non_default_stream(stream.s, "ktorch.copy_cpu_to_cuda_async");
+    if (src_cpu.device_ != Device::CPU) {
+        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: src must be a CPU tensor.");
+    }
+    if (dst_cuda.device_ != Device::CUDA) {
+        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: dst must be a CUDA tensor.");
+    }
+    if (src_cpu.shape_ != dst_cuda.shape_) {
+        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: src and dst shape mismatch.");
+    }
+    if (src_cpu.dtype_ != dst_cuda.dtype_) {
+        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: src and dst dtype mismatch.");
+    }
+    if (!src_cpu.is_contiguous() || !dst_cuda.is_contiguous()) {
+        throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: src and dst must be contiguous.");
+    }
+    if (strict_immutability && src_cpu.borrow_source_ == Tensor::BorrowSource::Torch) {
+        if (!tensor_validate_torch_borrow_version(src_cpu)) {
+            throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: borrowed torch tensor was mutated before copy.");
+        }
+    }
+
+    CUDA_CHECK(cudaMemcpyAsync(dst_cuda.data_, src_cpu.data_, src_cpu.nbytes_, cudaMemcpyHostToDevice, stream.s));
+
+    if (strict_immutability && src_cpu.borrow_source_ == Tensor::BorrowSource::Torch) {
+        if (!tensor_validate_torch_borrow_version(src_cpu)) {
+            throw std::invalid_argument("ktorch.copy_cpu_to_cuda_async: borrowed torch tensor was mutated during copy submission.");
+        }
+    }
+}
+
 inline void tensor_copy_from_torch_float(Tensor& dst, const py::object& obj) {
+    if (dst.is_read_only()) {
+        throw std::invalid_argument("ktorch.copy_from_torch_float: destination tensor is read-only.");
+    }
     if (dst.dtype_ != DType::F32) {
         throw std::invalid_argument("ktorch: copy_from_torch_float only supports F32 tensors.");
     }
@@ -292,6 +428,9 @@ inline void tensor_copy_from_torch_float(Tensor& dst, const py::object& obj) {
 }
 
 inline void tensor_copy_from_torch_int32(Tensor& dst, const py::object& obj) {
+    if (dst.is_read_only()) {
+        throw std::invalid_argument("ktorch.copy_from_torch_int32: destination tensor is read-only.");
+    }
     if (dst.dtype_ != DType::I32) {
         throw std::invalid_argument("ktorch: copy_from_torch_int32 only supports I32 tensors.");
     }

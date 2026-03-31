@@ -103,6 +103,58 @@ class TensorApiTest(unittest.TestCase):
         assert_allclose(tx.to_numpy_float().reshape(-1).tolist(), [1.0, -2.0, 3.5, 4.25])
         self.assertEqual(ty.to_numpy_int32().tolist(), [7, -3])
 
+    def test_from_torch_borrow_cpu_pinned_default(self):
+        try:
+            import torch
+        except Exception:
+            self.skipTest("torch unavailable")
+
+        x = torch.randn(2, 3, dtype=torch.float32)
+        with self.assertRaises(Exception):
+            _ = ktorch.from_torch_borrow_cpu(x)
+
+        xp = torch.randn(2, 3, dtype=torch.float32).pin_memory()
+        tx = ktorch.from_torch_borrow_cpu(xp)
+        self.assertEqual(tx.device, ktorch.Device.CPU)
+        self.assertTrue(tx.is_borrowed)
+        self.assertTrue(tx.is_read_only)
+        self.assertTrue(tx.validate_torch_borrow_version())
+
+    def test_from_torch_borrow_cpu_rejects_cuda(self):
+        if not cuda_available():
+            self.skipTest("CUDA unavailable")
+        try:
+            import torch
+        except Exception:
+            self.skipTest("torch unavailable")
+
+        x = torch.randn(2, 3, device="cuda", dtype=torch.float32)
+        with self.assertRaises(Exception):
+            _ = ktorch.from_torch_borrow_cpu(x, require_pinned=False)
+
+    def test_copy_cpu_to_cuda_async_with_strict_immutability(self):
+        if not cuda_available():
+            self.skipTest("CUDA unavailable")
+        try:
+            import torch
+        except Exception:
+            self.skipTest("torch unavailable")
+
+        src_torch = torch.tensor([[1.0, -2.0], [3.5, 4.25]], dtype=torch.float32).pin_memory()
+        src = ktorch.from_torch_borrow_cpu(src_torch)
+        dst = ktorch.empty([2, 2], dtype=ktorch.DType.F32, device=ktorch.Device.CUDA)
+        s = ktorch.next_stream()
+
+        with ktorch.stream_guard(s):
+            ktorch.copy_cpu_to_cuda_async(src, dst, s, True)
+        ktorch.synchronize(s)
+        assert_allclose(dst.to_numpy_float().reshape(-1).tolist(), [1.0, -2.0, 3.5, 4.25])
+
+        src_torch.add_(1.0)
+        with self.assertRaises(Exception):
+            with ktorch.stream_guard(s):
+                ktorch.copy_cpu_to_cuda_async(src, dst, s, True)
+
     def test_item_float_and_int32(self):
         tf = ktorch.Tensor([1], dtype=ktorch.DType.F32, device=ktorch.Device.CPU)
         tf.copy_from_list_float([3.25])

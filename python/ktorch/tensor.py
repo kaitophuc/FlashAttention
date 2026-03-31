@@ -7,6 +7,7 @@ Tensor = _C.Tensor
 Device = _C.Device
 DType = _C.DType
 Stream = _C.Stream
+Event = _C.Event
 
 
 def empty(shape, dtype=DType.F32, device=Device.CUDA):
@@ -60,6 +61,14 @@ def synchronize(stream: Stream | None = None) -> None:
         stream.synchronize()
 
 
+def record_event(event: Event, stream: Stream) -> None:
+    _C.record_event(event, stream)
+
+
+def wait_event(stream: Stream, event: Event) -> None:
+    _C.wait_event(stream, event)
+
+
 def from_numpy(array: Any, device=Device.CUDA):
     try:
         import numpy as np
@@ -105,6 +114,14 @@ def from_torch(tensor: Any, device=Device.CUDA):
         out.copy_from_torch_int32(t_i32)
         return out
     raise ValueError("ktorch.from_torch supports only torch.float32, torch.int32, and torch.int64.")
+
+
+def from_torch_borrow_cpu(tensor: Any, require_contiguous: bool = True, require_pinned: bool = True):
+    return _C.from_torch_borrow_cpu(tensor, require_contiguous, require_pinned)
+
+
+def copy_cpu_to_cuda_async(src_cpu: Tensor, dst_cuda: Tensor, stream: Stream, strict_immutability: bool = True) -> None:
+    _C.copy_cpu_to_cuda_async(src_cpu, dst_cuda, stream, strict_immutability)
 
 
 def to_numpy(tensor: Tensor):

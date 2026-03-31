@@ -4,6 +4,7 @@ from .tensor import (
     Device,
     DType,
     Stream,
+    Event,
     empty,
     zeros,
     random_uniform,
@@ -19,6 +20,10 @@ from .tensor import (
     stream_pool_size,
     stream_guard,
     synchronize,
+    record_event,
+    wait_event,
+    from_torch_borrow_cpu,
+    copy_cpu_to_cuda_async,
 )
 from . import ops
 from . import data
@@ -29,6 +34,7 @@ __all__ = [
     "Device",
     "DType",
     "Stream",
+    "Event",
     "empty",
     "zeros",
     "random_uniform",
@@ -44,6 +50,10 @@ __all__ = [
     "stream_pool_size",
     "stream_guard",
     "synchronize",
+    "record_event",
+    "wait_event",
+    "from_torch_borrow_cpu",
+    "copy_cpu_to_cuda_async",
     "ops",
     "data",
 ]

@@ -23,6 +23,10 @@ void bind_stream(py::module_& m) {
     py::class_<Stream>(m, "Stream")
         .def("synchronize", &Stream::synchronize);
 
+    py::class_<Event>(m, "Event")
+        .def(py::init<>())
+        .def("synchronize", &Event::synchronize);
+
     py::class_<PyStreamGuard>(m, "StreamGuard")
         .def("__enter__", &PyStreamGuard::enter)
         .def("__exit__", &PyStreamGuard::exit);
@@ -72,4 +76,20 @@ void bind_stream(py::module_& m) {
               stream.synchronize();
           },
           "Synchronize current CUDA stream.");
+
+    m.def("record_event",
+          [](Event& event, const Stream& stream) {
+              record(event, stream);
+          },
+          py::arg("event"),
+          py::arg("stream"),
+          "Record event on stream.");
+
+    m.def("wait_event",
+          [](const Stream& stream, Event& event) {
+              wait(stream, event);
+          },
+          py::arg("stream"),
+          py::arg("event"),
+          "Make stream wait for event.");
 }
