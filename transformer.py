@@ -519,7 +519,7 @@ def load_checkpoint(model, optimizer_wrapper, path):
     start_epoch = checkpoint['epoch'] + 1
     return start_epoch
 
-def fit(model, train_loader, eval_loader, criterion, optimizer_wrapper, num_epochs, clip_grad=None, save_path=None, start_epoch=0, bos_idx=None, eos_idx=None, eval_bleu_loader=None, eval_bleu_decode_method="beam", eval_bleu_beam_size=4, eval_bleu_alpha=0.6):
+def fit(model, train_loader, eval_loader, criterion, optimizer_wrapper, num_epochs, clip_grad=None, save_path=None, start_epoch=0, bos_idx=None, eos_idx=None, eval_bleu_loader=None, eval_bleu_decode_method="beam", eval_bleu_beam_size=4, eval_bleu_alpha=0.6, eval_every_epochs=1):
     best_eval_loss = float('inf')
     if save_path is not None and start_epoch > 0:
         ckpt = torch.load(save_path, map_location='cpu')
@@ -527,23 +527,29 @@ def fit(model, train_loader, eval_loader, criterion, optimizer_wrapper, num_epoc
     history = {"train_loss": [], "eval_loss": [], "eval_ppl": [], "eval_bleu": []}
     for epoch in range(start_epoch, num_epochs):
         train_loss = run_train_epoch(model, train_loader, criterion, optimizer_wrapper, clip_grad)
-        eval_loss, eval_ppl = run_eval_epoch(model, eval_loader)
+        should_eval = ((epoch + 1) % eval_every_epochs == 0) or (epoch == num_epochs - 1)
 
-        if eval_bleu_loader is not None and bos_idx is not None and eos_idx is not None:
-            bleu_score = evaluate_bleu(model, eval_bleu_loader, bos_idx, eos_idx, model.tgt_pad_idx, decode_method=eval_bleu_decode_method, beam_size=eval_bleu_beam_size, alpha=eval_bleu_alpha)
-            print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval Loss: {eval_loss:.4f} - Eval PPL: {eval_ppl:.4f} - Eval BLEU: {bleu_score:.4f}")
-            history["eval_bleu"].append(bleu_score)
+        if should_eval:
+            eval_loss, eval_ppl = run_eval_epoch(model, eval_loader)
+
+            if eval_bleu_loader is not None and bos_idx is not None and eos_idx is not None:
+                bleu_score = evaluate_bleu(model, eval_bleu_loader, bos_idx, eos_idx, model.tgt_pad_idx, decode_method=eval_bleu_decode_method, beam_size=eval_bleu_beam_size, alpha=eval_bleu_alpha)
+                print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval Loss: {eval_loss:.4f} - Eval PPL: {eval_ppl:.4f} - Eval BLEU: {bleu_score:.4f}")
+                history["eval_bleu"].append(bleu_score)
+            else:
+                print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval Loss: {eval_loss:.4f} - Eval PPL: {eval_ppl:.4f}")
+
+            if save_path is not None and eval_loss < best_eval_loss:
+                best_eval_loss = eval_loss
+                save_checkpoint(model, optimizer_wrapper, epoch, save_path, best_eval_loss)
+                print(f"Saved checkpoint at epoch {epoch+1} with eval loss {eval_loss:.4f}")
+
+            history["eval_loss"].append(eval_loss)
+            history["eval_ppl"].append(eval_ppl)
         else:
-            print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval Loss: {eval_loss:.4f} - Eval PPL: {eval_ppl:.4f}")
-
-        if save_path is not None and eval_loss < best_eval_loss:
-            best_eval_loss = eval_loss
-            save_checkpoint(model, optimizer_wrapper, epoch, save_path, best_eval_loss)
-            print(f"Saved checkpoint at epoch {epoch+1} with eval loss {eval_loss:.4f}")
+            print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval skipped (eval every {eval_every_epochs} epochs)")
 
         history["train_loss"].append(train_loss)
-        history["eval_loss"].append(eval_loss)
-        history["eval_ppl"].append(eval_ppl)
     return history
 
 @torch.no_grad()
@@ -604,7 +610,7 @@ def set_seed(seed=42, deterministic=False):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-def build_and_train_transformer(train_loader, eval_loader, src_vocab_size, tgt_vocab_size, num_epochs=10, device="cuda", save_path=None, resume=False, bos_idx=None, eos_idx=None, eval_bleu_loader=None):
+def build_and_train_transformer(train_loader, eval_loader, src_vocab_size, tgt_vocab_size, num_epochs=10, device="cuda", save_path=None, resume=False, bos_idx=None, eos_idx=None, eval_bleu_loader=None, eval_bleu_decode_method="beam", eval_every_epochs=1):
     set_seed(42)
     model = Transformer(src_vocab_size, tgt_vocab_size).to(device)
 
@@ -622,7 +628,21 @@ def build_and_train_transformer(train_loader, eval_loader, src_vocab_size, tgt_v
     else:        
         start_epoch = 0
 
-    history = fit(model, train_loader, eval_loader, criterion, optimizer_wrapper, num_epochs, save_path=save_path, start_epoch=start_epoch, bos_idx=bos_idx, eos_idx=eos_idx, eval_bleu_loader=eval_bleu_loader)
+    history = fit(
+        model,
+        train_loader,
+        eval_loader,
+        criterion,
+        optimizer_wrapper,
+        num_epochs,
+        save_path=save_path,
+        start_epoch=start_epoch,
+        bos_idx=bos_idx,
+        eos_idx=eos_idx,
+        eval_bleu_loader=eval_bleu_loader,
+        eval_bleu_decode_method=eval_bleu_decode_method,
+        eval_every_epochs=eval_every_epochs,
+    )
     return model, history
 
 @torch.no_grad()

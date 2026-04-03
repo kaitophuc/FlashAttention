@@ -30,6 +30,9 @@ def parse_args():
     p.add_argument("--num-epochs", type=int, default=10)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--eval-every-epochs", type=int, default=1)
+    p.add_argument("--disable-bleu", action="store_true")
+    p.add_argument("--bleu-decode-method", type=str, default="beam", choices=["beam", "greedy"])
 
     p.add_argument("--max-train-rows", type=int, default=200000)
     p.add_argument("--max-eval-rows", type=int, default=5000)
@@ -144,6 +147,8 @@ def make_loader(src_tensor, tgt_tensor, batch_size, shuffle, num_workers, pin_me
 
 def main():
     args = parse_args()
+    if args.eval_every_epochs < 1:
+        raise ValueError("--eval-every-epochs must be >= 1")
 
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("CUDA requested but not available.")
@@ -207,7 +212,9 @@ def main():
         resume=args.resume,
         bos_idx=bos_idx,
         eos_idx=eos_idx,
-        eval_bleu_loader=eval_loader,
+        eval_bleu_loader=None if args.disable_bleu else eval_loader,
+        eval_bleu_decode_method=args.bleu_decode_method,
+        eval_every_epochs=args.eval_every_epochs,
     )
 
     print("Done.")
