@@ -1,8 +1,11 @@
 import math
 import os
+from contextlib import nullcontext
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 import time
 
@@ -305,6 +308,44 @@ class LabelSmoothingLoss(nn.Module):
         loss = - (true_dist * log_probs).sum(dim=-1)
         valid_loss = loss.masked_select(mask)
         return valid_loss.mean() if valid_loss.numel() > 0 else loss.new_tensor(0.0, device=pred.device)
+
+
+def is_distributed_ready():
+    return dist.is_available() and dist.is_initialized()
+
+
+def get_world_size():
+    return dist.get_world_size() if is_distributed_ready() else 1
+
+
+def get_rank():
+    return dist.get_rank() if is_distributed_ready() else 0
+
+
+def is_main_process():
+    return get_rank() == 0
+
+
+def unwrap_model(model):
+    return model.module if hasattr(model, "module") else model
+
+
+def all_reduce_sum(tensor):
+    if is_distributed_ready():
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    return tensor
+
+
+def all_reduce_max(tensor):
+    if is_distributed_ready():
+        dist.all_reduce(tensor, op=dist.ReduceOp.MAX)
+    return tensor
+
+
+def autocast_context(device, use_amp, amp_dtype):
+    if not use_amp or device.type != "cuda":
+        return nullcontext()
+    return torch.autocast(device_type="cuda", dtype=amp_dtype)
     
 class NoamOpt:
     def __init__ (self, model_size, factor, warmup, optimizer):
@@ -320,33 +361,65 @@ class NoamOpt:
         return self.factor * (self.model_size ** (-0.5) * min(step ** (-0.5), step * self.warmup ** (-1.5)))
     
     def step(self):
+        self.update_learning_rate()
+        self.optimizer.step()
+
+    def update_learning_rate(self):
         self._step += 1
         lr = self.rate()
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
-        self.optimizer.step()
+        return lr
 
-    def zero_grad(self):
-        self.optimizer.zero_grad()
+    def zero_grad(self, set_to_none=True):
+        self.optimizer.zero_grad(set_to_none=set_to_none)
 
-def train_step(model, batch_src, batch_tgt, criterion, optimizer_wrapper, clip_grad=None):
-    model.train()
-    optimizer_wrapper.zero_grad()
-
+def train_step(
+    model,
+    batch_src,
+    batch_tgt,
+    criterion,
+    optimizer_wrapper,
+    clip_grad=None,
+    grad_accum_steps=1,
+    do_optimizer_step=True,
+    use_amp=False,
+    amp_dtype=torch.bfloat16,
+    scaler=None,
+):
+    base_model = unwrap_model(model)
     tgt_in = batch_tgt[:, :-1]
     tgt_out = batch_tgt[:, 1:]
 
-    output, _, _, _ = model(batch_src, tgt_in)
-    loss = criterion(output, tgt_out)
-    loss.backward()
+    with autocast_context(batch_src.device, use_amp, amp_dtype):
+        output, _, _, _ = model(batch_src, tgt_in)
+        loss = criterion(output, tgt_out)
 
-    if clip_grad is not None:
-        torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+    scaled_loss = loss / grad_accum_steps
+    if scaler is not None and scaler.is_enabled():
+        scaler.scale(scaled_loss).backward()
+    else:
+        scaled_loss.backward()
 
-    optimizer_wrapper.step()
+    did_step = False
+    if do_optimizer_step:
+        if clip_grad is not None:
+            if scaler is not None and scaler.is_enabled():
+                scaler.unscale_(optimizer_wrapper.optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
 
-    non_pad = (tgt_out != model.tgt_pad_idx).sum().item()
-    return loss.item(), non_pad
+        if scaler is not None and scaler.is_enabled():
+            optimizer_wrapper.update_learning_rate()
+            scaler.step(optimizer_wrapper.optimizer)
+            scaler.update()
+        else:
+            optimizer_wrapper.step()
+
+        optimizer_wrapper.zero_grad(set_to_none=True)
+        did_step = True
+
+    non_pad = (tgt_out != base_model.tgt_pad_idx).sum().item()
+    return loss.detach().item(), non_pad, did_step
 
 @torch.no_grad()
 def greedy_decode(model, src, max_len, bos_idx, eos_idx):
@@ -429,6 +502,7 @@ def beam_search_decode(model, src, max_len, bos_idx, eos_idx, beam_size = 4, alp
 @torch.no_grad()
 def eval_step(model, batch_src, batch_tgt):
     model.eval()
+    base_model = unwrap_model(model)
 
     tgt_in = batch_tgt[:, :-1]
     tgt_out = batch_tgt[:, 1:]
@@ -437,66 +511,182 @@ def eval_step(model, batch_src, batch_tgt):
 
     log_probs = torch.log_softmax(output, dim=-1)
     nll = -log_probs.gather(dim=-1, index=tgt_out.unsqueeze(-1)).squeeze(-1)
-    mask = (tgt_out != model.tgt_pad_idx)
+    mask = (tgt_out != base_model.tgt_pad_idx)
     nll = nll.masked_select(mask)
 
     loss = nll.mean() if nll.numel() > 0 else nll.new_tensor(0.0, device=output.device)
-    non_pad = (tgt_out != model.tgt_pad_idx).sum().item()
+    non_pad = (tgt_out != base_model.tgt_pad_idx).sum().item()
     ppl = math.exp(loss.item()) if loss.item() < 20 else float('inf')
     return loss.item(), ppl, non_pad
 
-def run_train_epoch(model, train_loader, criterion, optimizer_wrapper, clip_grad=None):
+def run_train_epoch(
+    model,
+    train_loader,
+    criterion,
+    optimizer_wrapper,
+    clip_grad=None,
+    grad_accum_steps=1,
+    use_amp=False,
+    amp_dtype=torch.bfloat16,
+    scaler=None,
+    log_interval=20,
+):
     model.train()
     total_loss = 0.0
     total_tokens = 0
+    total_data_time = 0.0
+    total_step_time = 0.0
+    local_optimizer_steps = 0
 
     device = next(model.parameters()).device
     num_batches = len(train_loader)
+    if num_batches == 0:
+        return 0.0, {
+            "tokens_per_sec": 0.0,
+            "steps_per_sec": 0.0,
+            "avg_data_time": 0.0,
+            "avg_step_time": 0.0,
+            "gpu_mem_gb": 0.0,
+            "optimizer_steps": 0,
+        }
+
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+
     epoch_start_time = time.time()
+    optimizer_wrapper.zero_grad(set_to_none=True)
+    last_step_end = time.time()
 
     for step, (batch_src, batch_tgt) in enumerate(train_loader, start=1):
+        data_time = time.time() - last_step_end
+        step_start = time.time()
+
         batch_src, batch_tgt = move_batch_to_device(batch_src, batch_tgt, device)
-        loss, non_pad = train_step(model, batch_src, batch_tgt, criterion, optimizer_wrapper, clip_grad)
+        should_step = (step % grad_accum_steps == 0) or (step == num_batches)
+        loss, non_pad, did_step = train_step(
+            model,
+            batch_src,
+            batch_tgt,
+            criterion,
+            optimizer_wrapper,
+            clip_grad=clip_grad,
+            grad_accum_steps=grad_accum_steps,
+            do_optimizer_step=should_step,
+            use_amp=use_amp,
+            amp_dtype=amp_dtype,
+            scaler=scaler,
+        )
+        if did_step:
+            local_optimizer_steps += 1
+
         total_loss += loss * non_pad
         total_tokens += non_pad
+        total_data_time += data_time
+        total_step_time += time.time() - step_start
 
         elapsed = time.time() - epoch_start_time
         avg_step = elapsed / step if step > 0 else 0
         eta_seconds = avg_step * (num_batches - step)
 
-        if step % 20 == 0 or step == num_batches:
+        if is_main_process() and (step % log_interval == 0 or step == num_batches):
             print(
                 f"[train] step {step}/{num_batches} "
                 f"elapsed={elapsed/60:.1f}m eta={eta_seconds/60:.1f}m",
                 end="\r",
                 flush=True,
             )
+        last_step_end = time.time()
 
-    print()
+    if is_main_process():
+        print()
 
-    avg_loss = total_loss / total_tokens if total_tokens > 0 else total_loss
-    return avg_loss
+    epoch_wall = time.time() - epoch_start_time
+    gpu_mem_gb = (
+        torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+        if device.type == "cuda"
+        else 0.0
+    )
 
-def run_eval_epoch(model, eval_loader):
+    sum_stats = torch.tensor(
+        [
+            total_loss,
+            float(total_tokens),
+            total_data_time,
+            total_step_time,
+            float(num_batches),
+            float(local_optimizer_steps),
+        ],
+        dtype=torch.float64,
+        device=device,
+    )
+    max_stats = torch.tensor(
+        [epoch_wall, gpu_mem_gb],
+        dtype=torch.float64,
+        device=device,
+    )
+    all_reduce_sum(sum_stats)
+    all_reduce_max(max_stats)
+
+    global_total_loss = sum_stats[0].item()
+    global_total_tokens = int(sum_stats[1].item())
+    global_total_data_time = sum_stats[2].item()
+    global_total_step_time = sum_stats[3].item()
+    global_total_batches = max(1.0, sum_stats[4].item())
+    global_optimizer_steps = max(1.0, sum_stats[5].item())
+    global_epoch_wall = max_stats[0].item()
+    global_gpu_mem_gb = max_stats[1].item()
+
+    avg_loss = global_total_loss / global_total_tokens if global_total_tokens > 0 else 0.0
+    stats = {
+        "tokens_per_sec": (global_total_tokens / global_epoch_wall) if global_epoch_wall > 0 else 0.0,
+        "steps_per_sec": (global_optimizer_steps / global_epoch_wall) if global_epoch_wall > 0 else 0.0,
+        "avg_data_time": global_total_data_time / global_total_batches,
+        "avg_step_time": global_total_step_time / global_total_batches,
+        "gpu_mem_gb": global_gpu_mem_gb,
+        "optimizer_steps": int(global_optimizer_steps),
+    }
+    return avg_loss, stats
+
+
+def run_eval_epoch(model, eval_loader, max_batches=None):
     model.eval()
     total_loss = 0.0
     total_tokens = 0
+    seen_batches = 0
 
     device = next(model.parameters()).device
+    eval_start_time = time.time()
 
     for batch_src, batch_tgt in eval_loader:
+        if max_batches is not None and seen_batches >= max_batches:
+            break
         batch_src, batch_tgt = move_batch_to_device(batch_src, batch_tgt, device)
         loss, _, non_pad = eval_step(model, batch_src, batch_tgt)
         total_loss += loss * non_pad
         total_tokens += non_pad
+        seen_batches += 1
 
-    avg_loss = total_loss / total_tokens if total_tokens > 0 else total_loss
+    eval_wall = time.time() - eval_start_time
+    sum_stats = torch.tensor(
+        [total_loss, float(total_tokens)],
+        dtype=torch.float64,
+        device=device,
+    )
+    max_stats = torch.tensor([eval_wall], dtype=torch.float64, device=device)
+    all_reduce_sum(sum_stats)
+    all_reduce_max(max_stats)
+
+    global_total_loss = sum_stats[0].item()
+    global_total_tokens = int(sum_stats[1].item())
+    avg_loss = global_total_loss / global_total_tokens if global_total_tokens > 0 else 0.0
     ppl = math.exp(avg_loss) if avg_loss < 20 else float('inf')
-    return avg_loss, ppl
+    stats = {"tokens": global_total_tokens, "wall_time": max_stats[0].item()}
+    return avg_loss, ppl, stats
 
 def save_checkpoint(model, optimizer_wrapper, epoch, path, best_eval_loss):
+    base_model = unwrap_model(model)
     checkpoint = {
-        'model_state_dict': model.state_dict(),
+        'model_state_dict': base_model.state_dict(),
         'optimizer_state_dict': optimizer_wrapper.optimizer.state_dict(),
         'epoch': epoch,
         'step': optimizer_wrapper._step,
@@ -519,27 +709,126 @@ def load_checkpoint(model, optimizer_wrapper, path):
     start_epoch = checkpoint['epoch'] + 1
     return start_epoch
 
-def fit(model, train_loader, eval_loader, criterion, optimizer_wrapper, num_epochs, clip_grad=None, save_path=None, start_epoch=0, bos_idx=None, eos_idx=None, eval_bleu_loader=None, eval_bleu_decode_method="beam", eval_bleu_beam_size=4, eval_bleu_alpha=0.6, eval_every_epochs=1):
+def fit(
+    model,
+    train_loader,
+    eval_loader,
+    criterion,
+    optimizer_wrapper,
+    num_epochs,
+    clip_grad=None,
+    save_path=None,
+    start_epoch=0,
+    bos_idx=None,
+    eos_idx=None,
+    eval_bleu_loader=None,
+    eval_bleu_decode_method="beam",
+    eval_bleu_beam_size=4,
+    eval_bleu_alpha=0.6,
+    eval_every_epochs=1,
+    grad_accum_steps=1,
+    precision="amp",
+    log_interval=20,
+    train_sampler=None,
+    eval_max_batches=None,
+    benchmark_throughput=False,
+):
     best_eval_loss = float('inf')
     if save_path is not None and start_epoch > 0:
         ckpt = torch.load(save_path, map_location='cpu')
         best_eval_loss = ckpt.get('best_eval_loss', float('inf'))
-    history = {"train_loss": [], "eval_loss": [], "eval_ppl": [], "eval_bleu": []}
+
+    device = next(model.parameters()).device
+    use_amp = (precision == "amp") and (device.type == "cuda")
+    amp_dtype = torch.bfloat16
+    if use_amp and not torch.cuda.is_bf16_supported():
+        amp_dtype = torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=(use_amp and amp_dtype == torch.float16))
+
+    if is_main_process():
+        precision_name = "fp32"
+        if use_amp:
+            precision_name = "bf16" if amp_dtype == torch.bfloat16 else "fp16"
+        print(f"[setup] precision={precision_name}, grad_accum_steps={grad_accum_steps}")
+
+    history = {
+        "train_loss": [],
+        "eval_loss": [],
+        "eval_ppl": [],
+        "eval_bleu": [],
+        "train_tokens_per_sec": [],
+        "train_steps_per_sec": [],
+        "train_avg_data_time": [],
+        "train_avg_step_time": [],
+        "train_gpu_mem_gb": [],
+        "effective_global_batch": [],
+    }
+
     for epoch in range(start_epoch, num_epochs):
-        train_loss = run_train_epoch(model, train_loader, criterion, optimizer_wrapper, clip_grad)
+        if train_sampler is not None and hasattr(train_sampler, "set_epoch"):
+            train_sampler.set_epoch(epoch)
+
+        train_loss, train_stats = run_train_epoch(
+            model,
+            train_loader,
+            criterion,
+            optimizer_wrapper,
+            clip_grad=clip_grad,
+            grad_accum_steps=grad_accum_steps,
+            use_amp=use_amp,
+            amp_dtype=amp_dtype,
+            scaler=scaler,
+            log_interval=log_interval,
+        )
+
         should_eval = ((epoch + 1) % eval_every_epochs == 0) or (epoch == num_epochs - 1)
 
+        effective_global_batch = train_loader.batch_size * get_world_size() * grad_accum_steps
+        history["train_loss"].append(train_loss)
+        history["train_tokens_per_sec"].append(train_stats["tokens_per_sec"])
+        history["train_steps_per_sec"].append(train_stats["steps_per_sec"])
+        history["train_avg_data_time"].append(train_stats["avg_data_time"])
+        history["train_avg_step_time"].append(train_stats["avg_step_time"])
+        history["train_gpu_mem_gb"].append(train_stats["gpu_mem_gb"])
+        history["effective_global_batch"].append(effective_global_batch)
+
         if should_eval:
-            eval_loss, eval_ppl = run_eval_epoch(model, eval_loader)
+            eval_loss, eval_ppl, _ = run_eval_epoch(model, eval_loader, max_batches=eval_max_batches)
+            bleu_score = None
 
-            if eval_bleu_loader is not None and bos_idx is not None and eos_idx is not None:
-                bleu_score = evaluate_bleu(model, eval_bleu_loader, bos_idx, eos_idx, model.tgt_pad_idx, decode_method=eval_bleu_decode_method, beam_size=eval_bleu_beam_size, alpha=eval_bleu_alpha)
-                print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval Loss: {eval_loss:.4f} - Eval PPL: {eval_ppl:.4f} - Eval BLEU: {bleu_score:.4f}")
+            if eval_bleu_loader is not None and bos_idx is not None and eos_idx is not None and is_main_process():
+                base_model = unwrap_model(model)
+                bleu_score = evaluate_bleu(
+                    base_model,
+                    eval_bleu_loader,
+                    bos_idx,
+                    eos_idx,
+                    base_model.tgt_pad_idx,
+                    decode_method=eval_bleu_decode_method,
+                    beam_size=eval_bleu_beam_size,
+                    alpha=eval_bleu_alpha,
+                )
+                print(
+                    f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - "
+                    f"Eval Loss: {eval_loss:.4f} - Eval PPL: {eval_ppl:.4f} - "
+                    f"Eval BLEU: {bleu_score:.4f} - Tokens/s: {train_stats['tokens_per_sec']:.1f} - "
+                    f"Data: {train_stats['avg_data_time']*1000:.2f}ms - Step: {train_stats['avg_step_time']*1000:.2f}ms - "
+                    f"GPU Mem: {train_stats['gpu_mem_gb']:.2f}GB - Effective Global Batch: {effective_global_batch}"
+                )
                 history["eval_bleu"].append(bleu_score)
-            else:
-                print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval Loss: {eval_loss:.4f} - Eval PPL: {eval_ppl:.4f}")
+            elif is_main_process():
+                print(
+                    f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - "
+                    f"Eval Loss: {eval_loss:.4f} - Eval PPL: {eval_ppl:.4f} - "
+                    f"Tokens/s: {train_stats['tokens_per_sec']:.1f} - "
+                    f"Data: {train_stats['avg_data_time']*1000:.2f}ms - Step: {train_stats['avg_step_time']*1000:.2f}ms - "
+                    f"GPU Mem: {train_stats['gpu_mem_gb']:.2f}GB - Effective Global Batch: {effective_global_batch}"
+                )
 
-            if save_path is not None and eval_loss < best_eval_loss:
+            if is_distributed_ready():
+                dist.barrier()
+
+            if save_path is not None and eval_loss < best_eval_loss and is_main_process():
                 best_eval_loss = eval_loss
                 save_checkpoint(model, optimizer_wrapper, epoch, save_path, best_eval_loss)
                 print(f"Saved checkpoint at epoch {epoch+1} with eval loss {eval_loss:.4f}")
@@ -547,9 +836,19 @@ def fit(model, train_loader, eval_loader, criterion, optimizer_wrapper, num_epoc
             history["eval_loss"].append(eval_loss)
             history["eval_ppl"].append(eval_ppl)
         else:
-            print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval skipped (eval every {eval_every_epochs} epochs)")
+            if is_main_process():
+                print(
+                    f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f} - "
+                    f"Eval skipped (every {eval_every_epochs} epochs) - "
+                    f"Tokens/s: {train_stats['tokens_per_sec']:.1f} - "
+                    f"Data: {train_stats['avg_data_time']*1000:.2f}ms - Step: {train_stats['avg_step_time']*1000:.2f}ms - "
+                    f"GPU Mem: {train_stats['gpu_mem_gb']:.2f}GB - Effective Global Batch: {effective_global_batch}"
+                )
 
-        history["train_loss"].append(train_loss)
+    if benchmark_throughput and is_main_process() and history["train_tokens_per_sec"]:
+        steady = history["train_tokens_per_sec"][1:] if len(history["train_tokens_per_sec"]) > 1 else history["train_tokens_per_sec"]
+        steady_tps = sum(steady) / len(steady)
+        print(f"[benchmark] steady_state_tokens_per_sec={steady_tps:.2f}")
     return history
 
 @torch.no_grad()
@@ -610,8 +909,32 @@ def set_seed(seed=42, deterministic=False):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-def build_and_train_transformer(train_loader, eval_loader, src_vocab_size, tgt_vocab_size, num_epochs=10, device="cuda", save_path=None, resume=False, bos_idx=None, eos_idx=None, eval_bleu_loader=None, eval_bleu_decode_method="beam", eval_every_epochs=1):
-    set_seed(42)
+def build_and_train_transformer(
+    train_loader,
+    eval_loader,
+    src_vocab_size,
+    tgt_vocab_size,
+    num_epochs=10,
+    device="cuda",
+    save_path=None,
+    resume=False,
+    bos_idx=None,
+    eos_idx=None,
+    eval_bleu_loader=None,
+    eval_bleu_decode_method="beam",
+    eval_every_epochs=1,
+    precision="amp",
+    grad_accum_steps=1,
+    log_interval=20,
+    train_sampler=None,
+    eval_max_batches=None,
+    benchmark_throughput=False,
+    distributed=False,
+    local_rank=0,
+    rank=0,
+    world_size=1,
+):
+    set_seed(42 + rank)
     model = Transformer(src_vocab_size, tgt_vocab_size).to(device)
 
     criterion = LabelSmoothingLoss(tgt_vocab_size, padding_idx=model.tgt_pad_idx, smoothing=0.1)
@@ -620,13 +943,23 @@ def build_and_train_transformer(train_loader, eval_loader, src_vocab_size, tgt_v
 
     if resume and save_path is not None:
         if not os.path.exists(save_path):
-            print(f"No checkpoint found at {save_path}, starting from scratch.")
+            if is_main_process():
+                print(f"No checkpoint found at {save_path}, starting from scratch.")
             start_epoch = 0
         else:
             start_epoch = load_checkpoint(model, optimizer_wrapper, save_path)
-            print(f"Resuming training from epoch {start_epoch}")
+            if is_main_process():
+                print(f"Resuming training from epoch {start_epoch}")
     else:        
         start_epoch = 0
+
+    if distributed:
+        model = DDP(
+            model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False,
+        )
 
     history = fit(
         model,
@@ -642,6 +975,12 @@ def build_and_train_transformer(train_loader, eval_loader, src_vocab_size, tgt_v
         eval_bleu_loader=eval_bleu_loader,
         eval_bleu_decode_method=eval_bleu_decode_method,
         eval_every_epochs=eval_every_epochs,
+        grad_accum_steps=grad_accum_steps,
+        precision=precision,
+        log_interval=log_interval,
+        train_sampler=train_sampler,
+        eval_max_batches=eval_max_batches,
+        benchmark_throughput=benchmark_throughput,
     )
     return model, history
 
