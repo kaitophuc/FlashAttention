@@ -725,6 +725,7 @@ def fit(
     eval_bleu_decode_method="beam",
     eval_bleu_beam_size=4,
     eval_bleu_alpha=0.6,
+    bleu_only_final=False,
     eval_every_epochs=1,
     grad_accum_steps=1,
     precision="amp",
@@ -796,7 +797,14 @@ def fit(
             eval_loss, eval_ppl, _ = run_eval_epoch(model, eval_loader, max_batches=eval_max_batches)
             bleu_score = None
 
-            if eval_bleu_loader is not None and bos_idx is not None and eos_idx is not None and is_main_process():
+            should_eval_bleu = (
+                eval_bleu_loader is not None
+                and bos_idx is not None
+                and eos_idx is not None
+                and is_main_process()
+                and ((not bleu_only_final) or (epoch == num_epochs - 1))
+            )
+            if should_eval_bleu:
                 base_model = unwrap_model(model)
                 bleu_score = evaluate_bleu(
                     base_model,
@@ -922,6 +930,7 @@ def build_and_train_transformer(
     eos_idx=None,
     eval_bleu_loader=None,
     eval_bleu_decode_method="beam",
+    bleu_only_final=False,
     eval_every_epochs=1,
     precision="amp",
     grad_accum_steps=1,
@@ -974,6 +983,7 @@ def build_and_train_transformer(
         eos_idx=eos_idx,
         eval_bleu_loader=eval_bleu_loader,
         eval_bleu_decode_method=eval_bleu_decode_method,
+        bleu_only_final=bleu_only_final,
         eval_every_epochs=eval_every_epochs,
         grad_accum_steps=grad_accum_steps,
         precision=precision,

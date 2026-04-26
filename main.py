@@ -47,6 +47,7 @@ def parse_args():
     p.add_argument("--eval-max-batches", type=int, default=None)
     p.add_argument("--disable-bleu", action="store_true")
     p.add_argument("--enable-bleu", dest="disable_bleu", action="store_false")
+    p.add_argument("--bleu-only-final", action="store_true")
     p.add_argument("--bleu-decode-method", type=str, default="beam", choices=["beam", "greedy"])
     p.add_argument("--benchmark-throughput", action="store_true")
     p.add_argument("--baseline-tokens-per-sec", type=float, default=None)
@@ -85,8 +86,14 @@ def read_pairs(csv_path, src_col, tgt_col, max_rows=None):
                 f"{csv_path} columns are {reader.fieldnames}, need src_col={src_col}, tgt_col={tgt_col}"
             )
         for i, row in enumerate(reader):
-            src = row[src_col].strip()
-            tgt = row[tgt_col].strip()
+            src = row.get(src_col)
+            tgt = row.get(tgt_col)
+            if src is None or tgt is None:
+                continue
+            src = src.strip()
+            tgt = tgt.strip()
+            if not src or not tgt:
+                continue
             if src and tgt:
                 pairs.append((src, tgt))
             if max_rows is not None and len(pairs) >= max_rows:
@@ -428,6 +435,7 @@ def main():
             eos_idx=eos_idx,
             eval_bleu_loader=eval_bleu_loader,
             eval_bleu_decode_method=args.bleu_decode_method,
+            bleu_only_final=args.bleu_only_final,
             eval_every_epochs=args.eval_every_epochs,
             precision=args.precision,
             grad_accum_steps=args.grad_accum_steps,
