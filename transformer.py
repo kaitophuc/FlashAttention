@@ -1,5 +1,8 @@
+import csv
 import math
 import os
+import re
+from collections import Counter
 from contextlib import nullcontext
 
 import torch
@@ -8,6 +11,145 @@ import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 import time
+
+class SimpleTokenizer:
+    def __init__(
+        self,
+        lower=True,
+        min_freq=1,
+        max_vocab_size=None,
+        pad_token="<pad>",
+        unk_token="<unk>",
+        bos_token="<bos>",
+        eos_token="<eos>",
+    ):
+        self.lower = lower
+        self.min_freq = min_freq
+        self.max_vocab_size = max_vocab_size
+        self.pad_token = pad_token
+        self.unk_token = unk_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+        self.special_tokens = [pad_token, unk_token, bos_token, eos_token]
+        if len(set(self.special_tokens)) != len(self.special_tokens):
+            raise ValueError("Special tokens must be unique.")
+
+        self.token_freqs = Counter()
+        self._reset_vocab()
+
+    @property
+    def pad_id(self):
+        return self.token_to_id[self.pad_token]
+
+    @property
+    def unk_id(self):
+        return self.token_to_id[self.unk_token]
+
+    @property
+    def bos_id(self):
+        return self.token_to_id[self.bos_token]
+
+    @property
+    def eos_id(self):
+        return self.token_to_id[self.eos_token]
+
+    @property
+    def vocab_size(self):
+        return len(self.id_to_token)
+
+    def __len__(self):
+        return self.vocab_size
+
+    def _reset_vocab(self):
+        self.token_to_id = {token: idx for idx, token in enumerate(self.special_tokens)}
+        self.id_to_token = list(self.special_tokens)
+
+    def tokenize(self, text):
+        if text is None:
+            text = ""
+        text = str(text)
+        if self.lower:
+            text = text.lower()
+        return re.findall(r"\w+|[^\w\s]", text)
+
+    def fit(self, texts):
+        counter = Counter()
+        for text in texts:
+            counter.update(self.tokenize(text))
+        return self._build_vocab(counter)
+
+    def fit_csv(self, csv_path, columns):
+        if isinstance(columns, str):
+            columns = [columns]
+
+        counter = Counter()
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            missing_columns = [column for column in columns if column not in reader.fieldnames]
+            if missing_columns:
+                raise ValueError(f"Missing CSV columns: {missing_columns}")
+
+            for row in reader:
+                for column in columns:
+                    counter.update(self.tokenize(row[column]))
+
+        return self._build_vocab(counter)
+
+    @classmethod
+    def from_texts(cls, texts, **kwargs):
+        tokenizer = cls(**kwargs)
+        return tokenizer.fit(texts)
+
+    @classmethod
+    def from_csv(cls, csv_path, columns, **kwargs):
+        tokenizer = cls(**kwargs)
+        return tokenizer.fit_csv(csv_path, columns)
+
+    def _build_vocab(self, counter):
+        self.token_freqs = counter
+        self._reset_vocab()
+
+        if self.max_vocab_size is not None and self.max_vocab_size < len(self.special_tokens):
+            raise ValueError("max_vocab_size must be at least the number of special tokens.")
+
+        max_tokens = None
+        if self.max_vocab_size is not None:
+            max_tokens = self.max_vocab_size - len(self.special_tokens)
+
+        tokens_added = 0
+        for token, count in sorted(counter.items(), key=lambda item: (-item[1], item[0])):
+            if count < self.min_freq or token in self.token_to_id:
+                continue
+            if max_tokens is not None and tokens_added >= max_tokens:
+                break
+            self.token_to_id[token] = len(self.id_to_token)
+            self.id_to_token.append(token)
+            tokens_added += 1
+
+        return self
+
+    def encode(self, text, add_bos=False, add_eos=False, max_len=None):
+        ids = [self.token_to_id.get(token, self.unk_id) for token in self.tokenize(text)]
+        if add_bos:
+            ids = [self.bos_id] + ids
+        if add_eos:
+            ids = ids + [self.eos_id]
+        if max_len is not None:
+            ids = ids[:max_len]
+        return ids
+
+    def decode(self, token_ids, skip_special_tokens=True):
+        tokens = []
+        for token_id in token_ids:
+            token_id = int(token_id)
+            if 0 <= token_id < len(self.id_to_token):
+                token = self.id_to_token[token_id]
+            else:
+                token = self.unk_token
+            if skip_special_tokens and token in self.special_tokens:
+                continue
+            tokens.append(token)
+        return " ".join(tokens)
 
 class TokenEmbedding(nn.Module):
     def __init__ (self, vocab_size, d_model):
